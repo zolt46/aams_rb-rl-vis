@@ -1120,8 +1120,7 @@ class MissionController:
         ]
 
     def _get_return_rifle2_pickup_sequence(self) -> List[Any]:
-        return [
-            "2_pick_rifle2 [0]",
+        seq: List[Any] = [
             "go_selector1",
             ("go_selector2", "close"),
             "go_selector3",
@@ -1158,6 +1157,10 @@ class MissionController:
             "rifle1_pickgo1_return",
             "rifle2_pickgo3_return",
         ]
+
+        if self.with_mag:
+            return ["2_pick_rifle2 [0]"] + seq
+        return seq
 
     def _get_return_rifle2_place_sequence(self) -> List[Any]:
         return [

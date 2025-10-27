@@ -614,6 +614,22 @@ class MissionController:
         else:
             print(f"[RAIL] 레일이 이미 외부에 있습니다.")
 
+    def rail_ensure_home(self):
+        print("[RAIL] 레일 위치 확인 및 인입...")
+        current_pos = self.bc.rail_get_position()
+        print(f"[RAIL] 현재 위치: {current_pos:.1f}mm")
+
+        if current_pos > 20.0:
+            print(f"[RAIL] 레일이 외부에 있습니다. HOME(0mm)으로 인입합니다...")
+            result = self.bc.rail_home(speed=RAIL_HOME_SPEED, wait=True)
+            if result.get("ok"):
+                print(f"[RAIL] ✓ 레일 인입 완료. 위치: {result.get('current_position')}mm")
+            else:
+                print(f"[RAIL] ✗ 레일 인입 실패: {result.get('err')}")
+                raise RuntimeError("레일 인입 실패")
+        else:
+            print("[RAIL] 레일이 이미 HOME 위치에 있습니다.")
+
     def rail_retract(self):
         print("[RAIL] 레일 인입 시작...")
         result = self.bc.rail_home(speed=RAIL_HOME_SPEED, wait=True)
@@ -631,6 +647,13 @@ class MissionController:
         else:
             print(f"[RAIL] ✗ 레일 배출 실패: {result.get('err')}")
             raise RuntimeError("레일 배출 실패")
+        
+    def rail_wait_outside(self, wait_seconds: float = 10.0):
+        print("[RAIL] 불입 준비 - 레일을 외부 위치로 이동합니다.")
+        self.rail_ensure_extended()
+        print(f"[RAIL] 외부 위치에서 {wait_seconds:.1f}초 대기합니다...")
+        time.sleep(wait_seconds)
+        print("[RAIL] 대기 완료.")
 
     # ----------------------------- 비전 검사 래퍼 -----------------------------
     def vision_check_qr(self):
@@ -954,16 +977,24 @@ class MissionController:
         
         if self.direction == "in":
             # ===== 불입(IN) 프로세스 =====
-            
-            # 0) 레일 인입
+
+            # 0) 레일 외부 확보 및 대기
+            steps.append(Step(
+                "레일 외부 위치 확보",
+                "레일을 외부 위치(800mm)로 이동시킨 뒤 10초간 대기합니다.",
+                run_fn=self.rail_wait_outside,
+                preview_labels=[]
+            ))
+
+            # 1) 레일 인입
             steps.append(Step(
                 "레일 인입",
-                "레일을 내부로 인입합니다.",
+                "외부 대기 후 레일을 HOME(0mm)으로 인입합니다.",
                 run_fn=self.rail_retract,
                 preview_labels=[]
             ))
-            
-            # 1) QR 코드 확인
+
+            # 2) QR 코드 확인
             if self.enable_vision:
                 steps.append(Step(
                     "QR 코드 확인",
@@ -971,8 +1002,8 @@ class MissionController:
                     run_fn=self.vision_check_qr,
                     preview_labels=[]
                 ))
-            
-            # 2) 조정간 안전 상태 확인
+
+            # 3) 조정간 안전 상태 확인
             if self.enable_vision:
                 steps.append(Step(
                     "조정간 안전 상태 확인",
@@ -1031,9 +1062,9 @@ class MissionController:
             
             # 1) 레일 준비
             steps.append(Step(
-                "레일 준비 (배출)",
-                "레일이 내부에 있으면 외부로 배출합니다.",
-                run_fn=self.rail_ensure_extended,
+                "레일 준비 (인입)",
+                "레일이 외부에 있으면 HOME(0mm)으로 인입합니다.",
+                run_fn=self.rail_ensure_home,
                 preview_labels=[]
             ))
             

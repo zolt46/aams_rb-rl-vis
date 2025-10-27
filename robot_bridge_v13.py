@@ -71,8 +71,8 @@ PING_INTERVAL_SEC = 2.0
 
 # 액추에이터 기본값
 ACTUATOR_DEFAULT_DISTANCE = 800  # mm
-ACTUATOR_DEFAULT_SPEED = 300     # mm/s
-ACTUATOR_HOME_SPEED = 200        # mm/s
+ACTUATOR_DEFAULT_SPEED = 250     # mm/s
+ACTUATOR_HOME_SPEED = 250        # mm/s
 
 # ---------------- 공통 유틸 ----------------
 

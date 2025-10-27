@@ -183,9 +183,11 @@ Place_Rifle [2] --> out_selector_safe_end2
 2_pick_rifle2 [2] --> rifle_pickgo3_return
 gripper close
 2_pick_rifle2 [3] --> rifle_pickgo4_return
+10_pick_rifle2 [7] --> rifle2_pickgo1_return
+2_pick_rifle2 [4] --> rifle1_pickgo1_return
 ==========================================
 
-2_pick_rifle2 [4] --> rifle1_pickgo1_return
+
 2_pick_rifle2 [5] --> rifle1_pickgo2_return
 2_pick_rifle2 [6] --> rifle1_pickgo3_return
 10_pick_rifle2 [5] --> rifle1_pickgo4_return
@@ -261,11 +263,12 @@ Place_Rifle [2] --> out_selector_safe_end2
 2_pick_rifle2 [2] --> rifle_pickgo3_return
 gripper close
 2_pick_rifle2 [3] --> rifle_pickgo4_return
+10_pick_rifle2 [7] --> rifle2_pickgo1_return
+2_pick_rifle2 [4] --> rifle1_pickgo1_return
 ===========================================
 
 
-10_pick_rifle2 [7] --> rifle2_pickgo1_return
-2_pick_rifle2 [4] --> rifle1_pickgo1_return
+
 10_place_gun2 [9] --> rifle2_pickgo3_return
 
 1_pick_gun2 [6] --> rifle2_pickgo4_return

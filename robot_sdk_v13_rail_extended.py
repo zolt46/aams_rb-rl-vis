@@ -80,8 +80,8 @@ class BridgeClient(object):
     
     # Linear Rail (Actuator) Defaults
     RAIL_MAX_STROKE = 800.0  # mm
-    RAIL_DEFAULT_SPEED = 250.0  # mm/s
-    RAIL_HOME_SPEED = 250.0  # mm/s
+    RAIL_DEFAULT_SPEED = 200.0  # mm/s
+    RAIL_HOME_SPEED = 200.0  # mm/s
 
     def __init__(self, host="192.168.1.23", port=50050, connect_timeout=3.0, io_timeout=8.0, retry=0):
         self.host = host; self.port = port
@@ -253,7 +253,7 @@ class BridgeClient(object):
         return (self.dio_get(int(adr), 1) != 0)
 
     # ---------------- Motion Commands (Truncated for brevity - include all from original) ----------------
-    def movej(self, joint, profile=None, ik_option=None, **kwargs):
+    def movej(self, joint, profile="SAFE", ik_option=None, **kwargs):
         prof = _apply_profile_and_merge(kwargs, profile)
         cmd = {"cmd":"movej", "joint": list(map(float, joint))}
         cmd.update(prof)

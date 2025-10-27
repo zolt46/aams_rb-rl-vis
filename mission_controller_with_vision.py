@@ -1131,6 +1131,7 @@ class MissionController:
             ("pickup_mag_return", "close"),
             "go_mag2vision1_return",
             "go_mag2vision2_return",
+            "check_vision_mag_return",
             "__VISION_MAG__",
             "go_vision2mag_return",
         ]
@@ -1233,6 +1234,7 @@ class MissionController:
 
     def _get_return_rifle1_place_sequence(self) -> List[Any]:
         return [
+            "rifle2_pickgo1_return",
             "rifle1_pickgo1_return",
             "rifle1_pickgo2_return",
             "rifle1_pickgo3_return",
@@ -1697,7 +1699,7 @@ if __name__ == "__main__":
     with_mag = (with_mag_input != "n")
     
     # QR 코드 기대값 (불입 시에만 의미 있음)
-    expected_qr = "1"
+    expected_qr = "2022120139"
     if direction == "in":
         qr_input = input(f"QR 코드 기대값 (기본={mission_num}): ").strip()
         if qr_input:
@@ -1709,6 +1711,9 @@ if __name__ == "__main__":
     enable_vision_input = input("비전 검사 활성화 (y/n, 기본=y): ").strip().lower()
     enable_vision = (enable_vision_input != "n")
 
+    enable_qr_check = False
+    enable_selector_check = True
+    enable_mag_check = True
     def ask_yes_no(prompt: str, default: bool = True) -> bool:
         raw = input(prompt).strip().lower()
         if not raw:

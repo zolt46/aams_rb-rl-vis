@@ -21,6 +21,7 @@ from collections import deque
 from PIL import Image, ImageFont, ImageDraw
 from pyzbar.pyzbar import decode as pyzbar_decode
 from typing import Dict, Any, List, Iterable, Optional, Callable, Tuple
+from contextlib import contextmanager
 from datetime import datetime
 from robot_sdk_v13_rail_extended import BridgeClient
 
@@ -598,7 +599,10 @@ class MissionController:
     def __init__(self, mission_number: int, direction: str, with_mag: bool,
                  expected_qr: str = "1",
                  bridge_host: str = "192.168.1.23",
-                 enable_vision: bool = True):
+                 enable_vision: bool = True,
+                 enable_qr_check: Optional[bool] = None,
+                 enable_selector_check: Optional[bool] = None,
+                 enable_mag_check: Optional[bool] = None):
         if mission_number not in (1, 2):
             raise ValueError("mission_number must be 1 or 2")
         if direction not in ("in", "out"):
@@ -610,6 +614,20 @@ class MissionController:
         self.expected_qr = expected_qr
         self.bridge_host = bridge_host
         self.enable_vision = enable_vision
+        self.enable_qr_check = enable_vision if enable_qr_check is None else enable_qr_check
+        self.enable_selector_check = enable_vision if enable_selector_check is None else enable_selector_check
+        self.enable_mag_check = enable_vision if enable_mag_check is None else enable_mag_check
+
+        if not self.enable_vision:
+            self.enable_qr_check = False
+            self.enable_selector_check = False
+            self.enable_mag_check = False
+
+        self.any_vision_check = (
+            self.enable_qr_check or
+            self.enable_selector_check or
+            self.enable_mag_check
+        )
 
         self.positions = load_positions_by_label(TEACH_FILE)
 
@@ -641,6 +659,7 @@ class MissionController:
 
         self._keepalive_thread: Optional[threading.Thread] = None
         self._keepalive_stop = threading.Event()
+        self.mag_failure_handler: Optional[Callable[[], None]] = None
 
     # ----------------------------- Keep-Alive -----------------------------
     def _send_keepalive(self):
@@ -755,8 +774,9 @@ class MissionController:
     # ----------------------------- 비전 검사 래퍼 -----------------------------
     def vision_check_qr(self):
         """QR 코드 검사 - 불일치 시 프로세스 중단 및 반출"""
-        if not self.enable_vision:
-            print("[VISION] 비전 검사 비활성화됨 - QR 검사 스킵")
+        if not self.enable_qr_check:
+            reason = "비전 검사 비활성화됨" if not self.enable_vision else "사용자 설정"
+            print(f"[VISION] {reason} - QR 검사 스킵")
             return
         
         print("\n" + "="*60)
@@ -773,15 +793,16 @@ class MissionController:
             print("[조치] 총기를 반출합니다...")
             
             # 반출 프로세스 실행
-            self._execute_return_process()
+            self._execute_return_process(cycle_back=True)
             raise RuntimeError(f"QR 코드 검증 실패: {message}")
         
         print("[VISION] ✓ QR 코드 검증 통과\n")
 
     def vision_check_selector(self):
         """조정간 안전 상태 검사 - SAFE 아니면 프로세스 중단 및 반출"""
-        if not self.enable_vision:
-            print("[VISION] 비전 검사 비활성화됨 - 조정간 검사 스킵")
+        if not self.enable_selector_check:
+            reason = "비전 검사 비활성화됨" if not self.enable_vision else "사용자 설정"
+            print(f"[VISION] {reason} - 조정간 검사 스킵")
             return
         
         print("\n" + "="*60)
@@ -798,15 +819,16 @@ class MissionController:
             print("[조치] 총기를 반출합니다...")
             
             # 반출 프로세스 실행
-            self._execute_return_process()
+            self._execute_return_process(cycle_back=True)
             raise RuntimeError(f"조정간 안전 검사 실패: {message}")
         
         print("[VISION] ✓ 조정간 안전 상태 확인 완료\n")
 
     def vision_check_mag(self):
         """탄창 방향 검사 - 우상탄 아니면 프로세스 정지"""
-        if not self.enable_vision:
-            print("[VISION] 비전 검사 비활성화됨 - 탄창 검사 스킵")
+        if not self.enable_mag_check:
+            reason = "비전 검사 비활성화됨" if not self.enable_vision else "사용자 설정"
+            print(f"[VISION] {reason} - 탄창 검사 스킵")
             return
         
         print("\n" + "="*60)
@@ -820,12 +842,22 @@ class MissionController:
             print("\n" + "!"*60)
             print("[경고] 탄창 방향이 올바르지 않습니다!")
             print("!"*60)
-            print("[조치] 프로세스를 정지합니다. 탄창을 확인하세요.")
+            print("[조치] 탄창을 원위치에 복귀하고 로봇을 정지합니다.")
+
+            if self.mag_failure_handler:
+                try:
+                    print("[조치] 탄창을 원래 위치로 복귀합니다...")
+                    self.mag_failure_handler()
+                    print("[조치] 탄창 복귀 완료. 사용자 확인이 필요합니다.")
+                except Exception as e:
+                    print(f"[경고] 탄창 복귀 중 오류: {e}")
+            else:
+                print("[경고] 복귀 시퀀스가 설정되어 있지 않습니다. 수동으로 복구하세요.")
             raise RuntimeError(f"탄창 방향 검사 실패: {message}")
         
         print("[VISION] ✓ 탄창 방향 확인 완료 (우상탄)\n")
 
-    def _execute_return_process(self):
+    def _execute_return_process(self, cycle_back: bool = True):
         """검사 실패 시 총기 반출 프로세스"""
         print("\n[반출 프로세스] 시작...")
         try:
@@ -833,6 +865,9 @@ class MissionController:
             # 실제 구현은 현재 상태에 따라 달라질 수 있음
             print("[반출] 레일 배출...")
             self.rail_extend()
+            if cycle_back:
+                print("[반출] 레일을 다시 HOME으로 인입합니다...")
+                self.rail_retract()
             print("[반출] 완료. 총기를 확인하고 재시도하세요.")
         except Exception as e:
             print(f"[반출 오류] 반출 중 오류 발생: {e}")
@@ -1025,6 +1060,27 @@ class MissionController:
             labels.append(label)
         return labels
 
+    @contextmanager
+    def _mag_failure_guard(self, handler: Callable[[], None]):
+        prev = self.mag_failure_handler
+        self.mag_failure_handler = handler
+        try:
+            yield
+        finally:
+            self.mag_failure_handler = prev
+
+    @contextmanager
+    def _suspend_gripper_actions(self, labels: Iterable[str]):
+        saved: Dict[str, str] = {}
+        for lbl in labels:
+            if lbl in self.gripper_actions:
+                saved[lbl] = self.gripper_actions.pop(lbl)
+        try:
+            yield
+        finally:
+            for lbl, action in saved.items():
+                self.gripper_actions[lbl] = action
+
     # ----------------------------- 조정간/장전/격발 블록 -----------------------------
     def run_selector_single(self):
         block_name = "selector->single"
@@ -1090,6 +1146,43 @@ class MissionController:
             "go_mag2",
             "out_mag2",
         ]
+    def _recover_mag_failure_inbound(self):
+        print("[복구] 탄창을 반납 위치로 되돌립니다...")
+        seq: List[Any] = [
+            "go_mag2vision2_return",
+            "go_mag2vision1_return",
+            ("pickup_mag_return", "open"),
+            "grip_mag_return",
+            "go_pick_mag_return1",
+        ]
+        self._run_sequence(seq, "mag failure recovery (return)")
+        self.bc.gripper_open()
+
+    def _recover_mag_failure_outbound(self):
+        print("[복구] 탄창을 보관 위치로 되돌립니다...")
+        if self.mission_number == 1:
+            seq: List[Any] = [
+                "go_mag_rail2",
+                "go_mag_rail1",
+                ("pickup_mag1", "open"),
+                "grip_mag1",
+                "go2mag1",
+            ]
+            suspend = ["grip_mag1"]
+        else:
+            seq = [
+                "go_mag_rail2",
+                "go_mag_rail1",
+                "out_mag2",
+                ("pickup_mag2", "open"),
+                "grip_mag2",
+                "go_mag2",
+            ]
+            suspend = ["grip_mag2"]
+
+        with self._suspend_gripper_actions(suspend):
+            self._run_sequence(seq, "mag failure recovery (out)")
+        self.bc.gripper_open()
 
     def _get_return_rifle1_pickup_sequence(self) -> List[Any]:
         return [
@@ -1210,7 +1303,8 @@ class MissionController:
         """탄창 집기 후 비전으로 이동 -> 우상탄 확인"""
         print("\n[불입-탄창] 탄창 집기 및 비전 위치 이동")
         seq = self._get_return_mag_pickup_sequence()
-        self._run_sequence(seq, "return mag pickup/vision")
+        with self._mag_failure_guard(self._recover_mag_failure_inbound):
+            self._run_sequence(seq, "return mag pickup/vision")
 
     def return_mag_place(self):
         """탄창을 보관함에 내려놓기"""
@@ -1308,7 +1402,7 @@ class MissionController:
             ))
 
             # 2) QR 코드 확인
-            if self.enable_vision:
+            if self.enable_qr_check:
                 steps.append(Step(
                     "QR 코드 확인",
                     f"총기의 QR 코드를 확인합니다. (기대값: {self.expected_qr})",
@@ -1317,7 +1411,7 @@ class MissionController:
                 ))
 
             # 3) 조정간 안전 상태 확인
-            if self.enable_vision:
+            if self.enable_selector_check:
                 steps.append(Step(
                     "조정간 안전 상태 확인",
                     "조정간이 SAFE 상태인지 확인합니다.",
@@ -1491,7 +1585,8 @@ class MissionController:
                     prev = self.gripper_actions.get("pickdown_rail", None)
                     self.gripper_actions["pickdown_rail"] = "open"
                     try:
-                        self._run_sequence(mag_place_seq, "place mag on rail")
+                        with self._mag_failure_guard(self._recover_mag_failure_outbound):
+                            self._run_sequence(mag_place_seq, "place mag on rail")
                     finally:
                         if prev is None:
                             self.gripper_actions.pop("pickdown_rail", None)
@@ -1534,9 +1629,11 @@ class MissionController:
             self.bc.go_home()
             
             # 비전 초기화
-            if self.enable_vision:
+            if self.any_vision_check:
                 self.vision = VisionController()
                 self.vision.initialize()
+            else:
+                self.vision = None
 
             steps = self.build_steps()
             print("\n[GUIDE] 단계별 실행이 시작됩니다. 각 단계는 실행 전 미리보기를 제공합니다.")
@@ -1567,7 +1664,13 @@ if __name__ == "__main__":
     print("="*60)
     print("    비전 통합 미션 컨트롤러")
     print("="*60)
-    
+
+    def ask_yes_no(prompt: str, default: bool = True) -> bool:
+        raw = input(prompt).strip().lower()
+        if not raw:
+            return default
+        return raw.startswith('y')
+
     # 미션 번호 선택
     while True:
         try:
@@ -1601,7 +1704,13 @@ if __name__ == "__main__":
     # 비전 활성화 여부
     enable_vision_input = input("비전 검사 활성화 (y/n, 기본=y): ").strip().lower()
     enable_vision = (enable_vision_input != "n")
-    
+
+    def ask_yes_no(prompt: str, default: bool = True) -> bool:
+        raw = input(prompt).strip().lower()
+        if not raw:
+            return default
+        return raw.startswith('y')
+
     # 브릿지 호스트 (옵션)
     bridge_host = input("브릿지 호스트 (기본=192.168.1.23): ").strip()
     if not bridge_host:
@@ -1614,6 +1723,12 @@ if __name__ == "__main__":
     if direction == "in":
         print(f"  QR 기대값: {expected_qr}")
     print(f"  비전 검사: {'활성화' if enable_vision else '비활성화'}")
+    if enable_vision:
+        print(f"    - QR 검사: {'실행' if enable_qr_check else '스킵'}")
+        print(f"    - 조정간 검사: {'실행' if enable_selector_check else '스킵'}")
+        print(f"    - 탄창 검사: {'실행' if enable_mag_check else '스킵'}")
+    else:
+        print("    - QR/조정간/탄창 검사: 스킵 (비전 비활성화)")
     print(f"  브릿지: {bridge_host}")
     
     confirm = input("\n시작하시겠습니까? (y/n): ").strip().lower()
@@ -1628,7 +1743,10 @@ if __name__ == "__main__":
         with_mag=with_mag,
         expected_qr=expected_qr,
         bridge_host=bridge_host,
-        enable_vision=enable_vision
+        enable_vision=enable_vision,
+        enable_qr_check=enable_qr_check,
+        enable_selector_check=enable_selector_check,
+        enable_mag_check=enable_mag_check
     )
     
     controller.run()

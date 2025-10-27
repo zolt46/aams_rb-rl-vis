@@ -1116,6 +1116,13 @@ class MissionController:
             "fire",
             "out_fire1",
             "out_fire2",
+            "go_cocking2",
+            "go_cocking3",
+            "cocking",
+            "go_cocking3",
+            "out_cocking1",
+            "out_cocking2",
+            "up2_rifle",
             "out_fire2selector",
             ("go_selector_from_fire1", "close"),
             "go_selector_from_fire2",
@@ -1163,6 +1170,13 @@ class MissionController:
             "fire",
             "out_fire1",
             "out_fire2",
+            "go_cocking2",
+            "go_cocking3",
+            "cocking",
+            "go_cocking3",
+            "out_cocking1",
+            "out_cocking2",
+            "up2_rifle",
             "out_fire2selector",
             ("go_selector_from_fire1", "close"),
             "go_selector_from_fire2",
@@ -1179,7 +1193,7 @@ class MissionController:
         ]
 
         if self.with_mag:
-            return ["2_pick_rifle2 [0]"] + seq
+            return ["go_mag2rifle_return"] + seq
         return seq
 
     def _get_return_rifle2_place_sequence(self) -> List[Any]:

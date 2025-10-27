@@ -292,15 +292,21 @@ class BridgeClient(object):
     def gripper_close(self, do1=None, do3=None):
         if do1 is None: do1 = self.GRIPPER_DO1
         if do3 is None: do3 = self.GRIPPER_DO3
-        self._io_set_bit(do1, 1); time.sleep(0.02)
+        # 개방 코일이 켜져 있으면 먼저 끄고 약간 대기한 뒤 닫힘 코일을 인가한다.
         self._io_set_bit(do3, 0)
+        time.sleep(0.05)
+        self._io_set_bit(do1, 1)
+        time.sleep(0.1)
         return {"ok": True}
 
     def gripper_open(self, do1=None, do3=None):
         if do1 is None: do1 = self.GRIPPER_DO1
         if do3 is None: do3 = self.GRIPPER_DO3
-        self._io_set_bit(do1, 0); time.sleep(0.02)
+        # 닫힘 코일을 먼저 끄고 충분한 간격을 둔 뒤 개방 코일을 켠다.
+        self._io_set_bit(do1, 0)
+        time.sleep(0.05)
         self._io_set_bit(do3, 1)
+        time.sleep(0.1)
         return {"ok": True}
 
     # ---------------- Pneumatic ----------------

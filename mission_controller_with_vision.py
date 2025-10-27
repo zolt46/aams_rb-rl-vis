@@ -676,7 +676,24 @@ class MissionController:
         
     def rail_wait_outside(self, wait_seconds: float = 10.0):
         print("[RAIL] 불입 준비 - 레일을 외부 위치로 이동합니다.")
-        self.rail_ensure_extended()
+        try:
+            current_pos = self.bc.rail_get_position()
+        except Exception:
+            current_pos = 0.0
+
+        if current_pos < RAIL_MAX_STROKE - 5.0:
+            print(f"[RAIL] 현재 {current_pos:.1f}mm → 외부 {RAIL_MAX_STROKE:.0f}mm로 이동합니다.")
+            result = self.bc.rail_move_to(
+                position=RAIL_MAX_STROKE,
+                speed=RAIL_FORWARD_SPEED,
+                wait=True
+            )
+            if not result.get("ok"):
+                raise RuntimeError(f"레일 외부 이동 실패: {result.get('err')}")
+            current_pos = result.get("current_position", RAIL_MAX_STROKE)
+        else:
+            print(f"[RAIL] 레일이 이미 외부({current_pos:.1f}mm) 위치에 있습니다. 유지 대기합니다.")
+
         print(f"[RAIL] 외부 위치에서 {wait_seconds:.1f}초 대기합니다...")
         time.sleep(wait_seconds)
         print("[RAIL] 대기 완료.")
@@ -849,7 +866,8 @@ class MissionController:
     # ----------------------------- 로봇 제어 -----------------------------
     def connect_bridge(self):
         print(f"[연결] BridgeClient 연결 중... host={self.bridge_host}")
-        self.bc = BridgeClient(host=self.bridge_host)
+        # 긴 동작 구간에서 소켓 타임아웃이 끊기지 않도록 IO 타임아웃을 넉넉하게 확장한다.
+        self.bc = BridgeClient(host=self.bridge_host, io_timeout=30.0, retry=1)
         try:
             hello = self.bc.connect()
             # hello 예: {"ok":true,"hello":"robot_bridge","ver":"1.3", ...}
@@ -859,6 +877,11 @@ class MissionController:
                 print(f"[연결] BridgeClient 연결 완료. {name} ver={ver}")
             else:
                 print(f"[연결] BridgeClient 연결 완료.")
+            try:
+                # 아두이노 측 버퍼를 비워 레일 명령이 즉시 수행되도록 한다.
+                self.bc.arduino_flush()
+            except Exception:
+                pass
         except Exception as e:
             # 연결 실패 시 명확한 원인 안내
             self.bc = None

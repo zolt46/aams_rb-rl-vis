@@ -612,7 +612,22 @@ class MissionController:
         self.enable_vision = enable_vision
 
         self.positions = load_positions_by_label(TEACH_FILE)
-        self.label_aliases = dict(self.LABEL_ALIASES)
+
+        # 최신 JSON에는 새 라벨명이 직접 포함되어 있으므로, 실제로 존재하는
+        # 라벨만 별칭으로 등록한다. (예: 새 라벨이 JSON에 있으면 그대로 사용)
+        effective_aliases: Dict[str, str] = {}
+        unresolved_aliases: List[str] = []
+        for src, dst in self.LABEL_ALIASES.items():
+            if src in self.positions:
+                # JSON이 이미 새 라벨을 제공하므로 별칭이 필요 없다.
+                continue
+            if dst in self.positions:
+                effective_aliases[src] = dst
+            else:
+                unresolved_aliases.append(f"{src}->{dst}")
+        if unresolved_aliases:
+            print("[WARN] JSON에서 찾을 수 없는 별칭 라벨:", unresolved_aliases)
+        self.label_aliases = effective_aliases
         missing = [lbl for lbl in self.REQUIRED_LABELS if lbl not in self.positions]
         if missing:
             print("[WARN] JSON에서 찾지 못한 라벨:", missing)
@@ -931,7 +946,12 @@ class MissionController:
             raise RuntimeError(f"브릿지({self.bridge_host}) 연결 실패: {e}")
 
     def resolve_label(self, label: str) -> str:
-        return self.label_aliases.get(label, label)
+        if label in self.positions:
+            return label
+        target = self.label_aliases.get(label)
+        if target and target in self.positions:
+            return target
+        return label
 
     def move_to(self, label: str, desc: str = ""):
         target_label = self.resolve_label(label)

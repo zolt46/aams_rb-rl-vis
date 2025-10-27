@@ -55,6 +55,29 @@ MAG_THRESH_X_DIFF = 10.0
 MAG_THRESH_BOX_CONF = 0.50
 
 # ----------------------------- JSON 로드 -----------------------------
+JOINT_KEY_PATTERNS = (
+    "Joint{idx}(deg)",
+    "Joint{idx}",
+    "Joint{idx}_deg",
+    "Joint{idx}Deg",
+    "Jnt{idx}",
+    "J{idx}",
+)
+
+
+def _coalesce_joint_value(rec: dict, idx: int) -> float:
+    for key_tpl in JOINT_KEY_PATTERNS:
+        key = key_tpl.format(idx=idx)
+        if key in rec:
+            val = rec.get(key)
+            if val is None:
+                continue
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                continue
+    return 0.0
+
 def _extract_records(obj) -> List[dict]:
     if isinstance(obj, dict):
         if "teach_data" in obj and isinstance(obj["teach_data"], list):
@@ -98,7 +121,10 @@ def load_positions_by_label(fn: str, wanted: Optional[Iterable[str]] = None) -> 
     positions: Dict[str, Dict[str, Any]] = {}
     for label, recs in buckets.items():
         latest = max(recs, key=lambda r: _parse_dt(r.get("DateTime")))
-        positions[label] = latest
+        normalized = dict(latest)
+        for idx in range(1, 7):
+            normalized[f"Joint{idx}(deg)"] = _coalesce_joint_value(latest, idx)
+        positions[label] = normalized
 
     if not positions:
         raise ValueError("JSON에서 유효한 라벨 포지션을 찾지 못했습니다.")

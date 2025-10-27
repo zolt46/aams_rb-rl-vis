@@ -794,7 +794,8 @@ class MissionController:
         
         # 레일 위치
         self.block_up_before_rail = ["up1_rifle", "up2_rifle"]
-        self.block_place_on_rail = ["on_rail1", "on_rail2", "on_rail3", 
+        self.block_place_on_rail = ["up1_rifle", "up2_rifle",
+                                   "on_rail1", "on_rail2", "on_rail3",
                                    "on_rail4", "on_rail5", "on_rail6", "fallback_rail"]
         
         # 조정간 - 단발
@@ -829,8 +830,11 @@ class MissionController:
         # 탄창
         self.block_pick_mag1 = ["go2mag1", "grip_mag1", "pickup_mag1"]
         self.block_pick_mag2 = ["go_mag2", "grip_mag2", "pickup_mag2", "out_mag2"]
-        self.block_place_mag_on_rail = ["go_mag_rail1", "go_mag_rail2", "go_mag_rail3_vision",
-                                       "go_mag_rail4", "go_mag_rail5", "go_mag_rail6"]
+        self.block_place_mag_on_rail = [
+            "go_mag_rail1", "go_mag_rail2", "go_mag_rail3_vision",
+            "go_mag_rail4", "go_mag_rail5", "go_mag_rail6",
+            "pickdown_rail", "out_mag_rail1", "out_mag_rail2", "out_mag_rail3"
+        ]
         self.block_retrieve_mag_from_rail = ["pickdown_rail", "out_mag_rail1", 
                                             "out_mag_rail2", "out_mag_rail3"]
         
@@ -925,10 +929,35 @@ class MissionController:
 
     # ----------------------------- 조정간/장전/격발 블록 -----------------------------
     def run_selector_single(self):
-        self.exec_labels(self.block_selector_single, "selector->single")
+        block_name = "selector->single"
+        labels = self.block_selector_single
+        print(f"\n[실행] 블록 '{block_name}' 시작 -> {len(labels)}개 라벨")
+        self.move_to("go_selector1", desc=f"in block '{block_name}'")
+        self.move_to("go_selector2", desc=f"in block '{block_name}'")
+        print("  → gripper CLOSE (manual) before 'go_selector3'")
+        self.bc.gripper_close()
+        self.move_to("go_selector3", desc=f"in block '{block_name}'")
+        self.move_to("spin_selector_semi", desc=f"in block '{block_name}'")
+        self.move_to("out_selector1", desc=f"in block '{block_name}'")
+        print("  → gripper OPEN (manual) after 'out_selector1'")
+        self.bc.gripper_open()
+        self.move_to("out_selector2", desc=f"in block '{block_name}'")
+        print(f"[실행] 블록 '{block_name}' 완료.\n")
 
     def run_selector_safe_from_fire(self):
-        self.exec_labels(self.block_selector_safe, "selector->safe(from fire)")
+        block_name = "selector->safe(from fire)"
+        labels = self.block_selector_safe
+        print(f"\n[실행] 블록 '{block_name}' 시작 -> {len(labels)}개 라벨")
+        self.move_to("go_selector_from_fire1", desc=f"in block '{block_name}'")
+        print("  → gripper CLOSE (manual) before 'go_selector_from_fire2'")
+        self.bc.gripper_close()
+        self.move_to("go_selector_from_fire2", desc=f"in block '{block_name}'")
+        self.move_to("spin_selector_safe", desc=f"in block '{block_name}'")
+        self.move_to("out_selector_safe_end1", desc=f"in block '{block_name}'")
+        self.move_to("out_selector_safe_end2", desc=f"in block '{block_name}'")
+        print("  → gripper OPEN (manual) after 'out_selector_safe_end2'")
+        self.bc.gripper_open()
+        print(f"[실행] 블록 '{block_name}' 완료.\n")
 
     def run_cocking(self):
         self.exec_labels(self.block_cocking_core, "cocking")
@@ -1211,11 +1240,22 @@ class MissionController:
                         run_fn=lambda: self.exec_labels(self.block_pick_mag2, "pick mag2"),
                         preview_labels=self.block_pick_mag2
                     ))
+                def place_mag_on_rail_with_drop():
+                    prev = self.gripper_actions.get("pickdown_rail", None)
+                    self.gripper_actions["pickdown_rail"] = "open"
+                    try:
+                        self.exec_labels(self.block_place_mag_on_rail,
+                                         "place mag on rail")
+                    finally:
+                        if prev is None:
+                            self.gripper_actions.pop("pickdown_rail", None)
+                        else:
+                            self.gripper_actions["pickdown_rail"] = prev
+
                 steps.append(Step(
                     "탄창 레일에 올리기",
                     "집은 탄창을 레일 위 지정 위치에 내려놓습니다.",
-                    run_fn=lambda: self.exec_labels(self.block_place_mag_on_rail, 
-                                                    "place mag on rail"),
+                    run_fn=place_mag_on_rail_with_drop,
                     preview_labels=self.block_place_mag_on_rail
                 ))
 

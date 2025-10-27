@@ -24,7 +24,7 @@ from typing import Dict, Any, List, Iterable, Optional, Callable, Tuple
 from datetime import datetime
 from robot_sdk_v13_rail_extended import BridgeClient
 
-TEACH_FILE = "final_asset_rename.json"
+TEACH_FILE = "final_asset.json"
 KEEPALIVE_INTERVAL = 5.0
 
 # 레일 설정
@@ -549,11 +549,11 @@ class MissionController:
         "go_mag_rail4", "go_mag_rail5", "go_mag_rail6",
         "pickdown_rail", "out_mag_rail1", "out_mag_rail2", "out_mag_rail3",
         # 불입 전용 포지션들
-        "go_pick_mag_return1", "o_mag2vision_return1", "go_mag2vision_return2",
+        "go_pick_mag_return", "o_mag2vision_return1", "go_mag2vision_return2",
         "check_vision_mag_return", "vision2mag_return",
         "place_mag1_return1", "place_mag1_return2",
         "out_mag1_return1", "out_mag1_return2", "out_mag1_return3",
-        "pick_mag_return", "go_pick_mag_return2",
+        "pick_mag_return", "go_pick_mag_return",
         "goto_place_return1", "goto_place_return2",
         "go_grip_rifle1_return1 [0]", "go_grip_rifle1_return2",
         "grip_rifle1_return", "out_grip_rifle1_return1", "out_grip_rifle1_return2",
@@ -566,7 +566,7 @@ class MissionController:
     ]
 
     LABEL_ALIASES = {
-        "grip_mag_return": "go_pick_mag_return2",
+        "grip_mag_return": "go_pick_mag_return",
         "pickup_mag_return": "pick_mag_return",
         "go_mag2vision1_return": "o_mag2vision_return1",
         "go_mag2vision2_return": "go_mag2vision_return2",
@@ -878,7 +878,7 @@ class MissionController:
                                             "out_mag_rail2", "out_mag_rail3"]
         
         # 불입 전용 - 탄창 비전 검사 후 배치
-        self.block_mag_to_vision = ["go_pick_mag_return1", "o_mag2vision_return1", 
+        self.block_mag_to_vision = ["go_pick_mag_return", "o_mag2vision_return1", 
                                    "go_mag2vision_return2", "check_vision_mag_return"]
         self.block_vision_to_mag = ["vision2mag_return"]
         self.block_place_mag_return = ["place_mag1_return1", "place_mag1_return2"]
@@ -1046,7 +1046,7 @@ class MissionController:
     # ----------------------------- 불입 프로세스 시퀀스 정의 -----------------------------
     def _get_return_mag_pickup_sequence(self) -> List[Any]:
         return [
-            "go_pick_mag_return1",
+            "go_pick_mag_return",
             "grip_mag_return",
             ("pickup_mag_return", "close"),
             "go_mag2vision1_return",

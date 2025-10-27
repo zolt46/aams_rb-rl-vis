@@ -709,19 +709,31 @@ class Bridge(object):
             ik_opt = cmd.get("ik_option") if isinstance(cmd.get("ik_option"), dict) else None
             with self._IKTempCtx(self, ik_opt):
                 if name == "movej":
-                    j = cmd.get("j") or []
+                    # accept both 'j' (legacy) and 'joint' (SDK v1.3)
+                    j = cmd.get("j")
+                    if j is None:
+                        j = cmd.get("joint") or []
                     self.rb.move(Joint(j))
                     return reply({"ok": True})
                 if name == "movel":
-                    p = cmd.get("p") or []
+                    # accept both 'p' and 'pose'
+                    p = cmd.get("p")
+                    if p is None:
+                        p = cmd.get("pose") or []
                     self.rb.move(Position(p[0],p[1],p[2],p[3],p[4],p[5]))
                     return reply({"ok": True})
                 if name == "line":
-                    p = cmd.get("p") or []
+                    # accept both 'p' and 'pose'
+                    p = cmd.get("p")
+                    if p is None:
+                        p = cmd.get("pose") or []
                     self.rb.line(Position(p[0],p[1],p[2],p[3],p[4],p[5]))
                     return reply({"ok": True})
                 if name == "relline":
-                    dp = cmd.get("dp") or [0,0,0,0,0,0]
+                    # accept both 'dp' and 'delta_p'
+                    dp = cmd.get("dp")
+                    if dp is None:
+                        dp = cmd.get("delta_p") or [0,0,0,0,0,0]
                     dx,dy,dz,drz,dry,drx = dp
                     dx,dy,dz = _to_mm_xyz(dx), _to_mm_xyz(dy), _to_mm_xyz(dz)
                     confirm_large = bool(cmd.get("confirm_large", False))
@@ -731,7 +743,10 @@ class Bridge(object):
                     self.rb.relline(float(dx), float(dy), float(dz), float(drz), float(dry), float(drx))
                     return reply({"ok": True})
                 if name == "reljnt":
-                    dj = cmd.get("dj") or [0,0,0,0,0,0]
+                    # accept both 'dj' and 'delta_j'
+                    dj = cmd.get("dj")
+                    if dj is None:
+                        dj = cmd.get("delta_j") or [0,0,0,0,0,0]
                     confirm_large = bool(cmd.get("confirm_large", False))
                     if not confirm_large:
                         if max([abs(_float(x, 0.0)) for x in dj]) > 10.0:
@@ -747,6 +762,20 @@ class Bridge(object):
                 start = int(cmd.get("start",16))
                 bits  = cmd.get("bits","")
                 dout(start, bits)
+                return reply({"ok": True})
+            elif mode == "set_bit":
+                # SDK v1.3 경로: 단일 비트 토글
+                idx = int(cmd.get("index"))
+                val = 1 if int(cmd.get("val",1)) else 0
+                try:
+                    # 우선 메모리 IO 단일비트 API가 있으면 사용
+                    if self._io_bit_write:
+                        self._io_bit_write(idx, val)
+                    else:
+                        # 없으면 dout로 해당 비트만 세트 (컨트롤러가 지원하는 단위에 맞춤)
+                        dout(idx, "1" if val else "0")
+                except Exception as e:
+                    return reply({"ok": False, "err": "io.set_bit failed: %s" % e})
                 return reply({"ok": True})
             else:
                 adr = int(cmd.get("adr",0)); width = int(cmd.get("width",1))

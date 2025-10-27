@@ -1,0 +1,379 @@
+Mag_Catch [1] --> pick_rifle1
+
+Mag_Catch [2] --> grip_rifle1
+
+spare2 [9] --> up_rifle1
+
+--------------------------- 출고 1 2 공통
+spare2 [8] --> up1_rifle
+
+spare2 [7] --> up2_rifle
+
+Mag_Catch [4] --> on_rail1
+
+Mag_Catch [5] --> on_rail2
+
+Mag_Catch [6] --> on_rail3
+
+spare2 [4] --> on_rail4
+
+Mag_Catch [7] --> on_rail5
+
+Mag_Catch [8] --> on_rail6
+
+Mag_Catch [9] --> fallback_rail
+ 
+Mag_Vision [0] --> go_selector1
+
+Mag_Vision [1] --> go_selector2
+
+Mag_Vision [2] --> go_selector3
+
+Mag_Vision [3] --> spin_selector_semi
+
+Mag_Vision [4] --> out_selector1
+
+Mag_Vision [5] --> out_selector2
+
+Mag_Vision [6] --> go_cocking1
+
+Mag_Vision [7] --> go_cocking2
+
+Mag_Vision [8] --> go_cocking3
+
+Mag_Vision [9] --> cocking
+
+Pick_Rifle [0] --> out_cocking1
+
+Pick_Rifle [1] --> out_cocking2
+
+Pick_Rifle [2] --> go_fire1
+
+Pick_Rifle [3] --> go_fire2
+
+Pick_Rifle [4] --> fire
+
+Pick_Rifle [5] --> out_fire1
+
+Pick_Rifle [6] --> out_fire2
+
+Pick_Rifle [7] --> out_fire2selector
+
+Pick_Rifle [8] --> go_selector_from_fire1
+
+Pick_Rifle [9] --> go_selector_from_fire2
+
+Place_Rifle [0] --> spin_selector_safe
+
+Place_Rifle [1] --> out_selector_safe_end1
+
+Place_Rifle [2] --> out_selector_safe_end2
+--------------------------------------------------------공통
+
+Place_Rifle [3] --> go2mag1
+
+Place_Rifle [4] --> grip_mag1
+
+Place_Rifle [5] --> pickup_mag1
+
+------------------------------------------------------공통
+Place_Rifle [6] --> go_mag_rail1
+
+Place_Rifle [7] --> go_mag_rail2
+
+Place_Rifle [8] --> go_mag_rail3_vision
+
+Place_Rifle [9] --> go_mag_rail4
+
+Cocking1 [0] --> go_mag_rail5
+
+Cocking1 [1] --> go_mag_rail6
+
+Cocking1 [2] --> pickdown_rail
+
+Cocking1 [3] --> out_mag_rail1
+
+Cocking1 [4] --> out_mag_rail2
+
+Cocking1 [5] --> out_mag_rail3
+
+Cocking1 [6] --> home_rdy
+
+
+1_pick_gun2 [0] --> pick_rifle2
+1_pick_gun2 [1] --> grip_rifle2
+1_pick_gun2 [2] --> up1_rifle2
+1_pick_gun2 [3] --> up2_rifle2
+1_pick_gun2 [4] --> up3_rifle2
+1_pick_gun2 [5] --> up4_rifle2
+
+
+1_pick_mag2 [0] --> go_mag2
+1_pick_mag2 [1] --> grip_mag2
+1_pick_mag2 [2] --> pickup_mag2
+1_pick_mag2 [3] --> out_mag2
+
+
+=========================================================
+
+ 
+1번 반납
+
+=============================================반납공통
+1_pick_rifle2 [0] --> go_pick_mag_return1
+1_pick_rifle2 [1] --> grip_mag_return
+1_pick_rifle2 [2] --> pickup_mag_return
+
+gripper close
+
+1_pick_rifle2 [3] --> go_mag2vision1_return
+1_pick_rifle2 [4] --> go_mag2vision2_return
+
+10_pick_rifle2 [9] --> check_vision_mag_return
+
+1_pick_rifle2 [5] --> go_vision2mag_return
+=================================================
+
+1_pick_rifle2 [6] --> place_mag1_1_return
+1_pick_rifle2 [7] --> place_mag1_2_return
+
+gripper open
+
+1_pick_rifle2 [8] --> out_mag1_1_return
+1_pick_rifle2 [9] --> out_mag1_2_return
+
+
+========================================아래 공통
+2_pick_rifle2 [0] --> go_mag2rifle_return
+Mag_Vision [0] --> go_selector1
+Mag_Vision [1] --> go_selector2
+gripper close
+Mag_Vision [2] --> go_selector3
+Mag_Vision [3] --> spin_selector_semi
+Mag_Vision [4] --> out_selector1
+Mag_Vision [5] --> out_selector2
+Mag_Vision [6] --> go_cocking1
+gripper open
+
+Mag_Vision [7] --> go_cocking2
+Mag_Vision [8] --> go_cocking3
+Mag_Vision [9] --> cocking
+
+Pick_Rifle [0] --> out_cocking1
+Pick_Rifle [1] --> out_cocking2
+Pick_Rifle [2] --> go_fire1
+Pick_Rifle [3] --> go_fire2
+Pick_Rifle [4] --> fire
+Pick_Rifle [5] --> out_fire1
+Pick_Rifle [6] --> out_fire2
+Pick_Rifle [7] --> out_fire2selector
+Pick_Rifle [8] --> go_selector_from_fire1
+gripper close
+
+Pick_Rifle [9] --> go_selector_from_fire2
+Place_Rifle [0] --> spin_selector_safe
+Place_Rifle [1] --> out_selector_safe_end1
+gripper open
+Place_Rifle [2] --> out_selector_safe_end2
+=================================================공통끝
+
+=============================================반납공통
+10_pick_rifle2 [8] --> rifle_pickgo1_return
+2_pick_rifle2 [1] --> rifle_pickgo2_return
+2_pick_rifle2 [2] --> rifle_pickgo3_return
+gripper close
+2_pick_rifle2 [3] --> rifle_pickgo4_return
+==========================================
+
+2_pick_rifle2 [4] --> rifle1_pickgo1_return
+2_pick_rifle2 [5] --> rifle1_pickgo2_return
+2_pick_rifle2 [6] --> rifle1_pickgo3_return
+10_pick_rifle2 [5] --> rifle1_pickgo4_return
+10_pick_rifle2 [6] --> rifle1_pickgo5_return
+2_pick_rifle2 [8] --> rifle1_pickgo6_return
+gripper open
+2_pick_rifle2 [9] --> rifle1_pickgo7_return
+
+
+ ===============2번 반납 ===================
+
+==============================================반납공통
+1_pick_rifle2 [0] --> go_pick_mag_return1
+1_pick_rifle2 [1] --> grip_mag_return
+1_pick_rifle2 [2] --> pickup_mag_return
+
+gripper close
+
+1_pick_rifle2 [3] --> go_mag2vision1_return
+1_pick_rifle2 [4] --> go_mag2vision2_return
+
+10_pick_rifle2 [9] --> check_vision_mag_return
+
+1_pick_rifle2 [5] --> go_vision2mag_return
+=================================================
+
+1_pick_mag2 [3] --> out_mag2
+1_pick_mag2 [2] --> pickup_mag2
+1_pick_mag2 [1] --> grip_mag2
+gripper open 
+1_pick_mag2 [0] --> go_mag2
+1_pick_mag2 [3] --> out_mag2
+
+
+============================================공통
+2_pick_rifle2 [0] --> 2_pick_rifle2 [0]
+
+Mag_Vision [0] --> go_selector1
+Mag_Vision [1] --> go_selector2
+gripper close
+Mag_Vision [2] --> go_selector3
+Mag_Vision [3] --> spin_selector_semi
+Mag_Vision [4] --> out_selector1
+Mag_Vision [5] --> out_selector2
+Mag_Vision [6] --> go_cocking1
+gripper open
+
+Mag_Vision [7] --> go_cocking2
+Mag_Vision [8] --> go_cocking3
+Mag_Vision [9] --> cocking
+
+Pick_Rifle [0] --> out_cocking1
+Pick_Rifle [1] --> out_cocking2
+Pick_Rifle [2] --> go_fire1
+Pick_Rifle [3] --> go_fire2
+Pick_Rifle [4] --> fire
+Pick_Rifle [5] --> out_fire1
+Pick_Rifle [6] --> out_fire2
+Pick_Rifle [7] --> out_fire2selector
+Pick_Rifle [8] --> go_selector_from_fire1
+gripper close
+
+Pick_Rifle [9] --> go_selector_from_fire2
+Place_Rifle [0] --> spin_selector_safe
+Place_Rifle [1] --> out_selector_safe_end1
+gripper open
+Place_Rifle [2] --> out_selector_safe_end2
+============================================공통
+
+=========================================반납 공통
+10_pick_rifle2 [8] --> rifle_pickgo1_return
+2_pick_rifle2 [1] --> rifle_pickgo2_return
+2_pick_rifle2 [2] --> rifle_pickgo3_return
+gripper close
+2_pick_rifle2 [3] --> rifle_pickgo4_return
+===========================================
+
+
+10_pick_rifle2 [7] --> rifle2_pickgo1_return
+2_pick_rifle2 [4] --> rifle1_pickgo1_return
+10_place_gun2 [9] --> rifle2_pickgo3_return
+
+1_pick_gun2 [6] --> rifle2_pickgo4_return
+1_pick_gun2 [7] --> rifle2_pickgo5_return
+1_pick_gun2 [3] --> up2_rifle2
+1_pick_gun2 [2] --> up1_rifle2
+1_pick_gun2 [1] --> grip_rifle2
+
+gripper open
+
+1_pick_gun2 [0] --> pick_rifle2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+("1_pick_rifle2", [0, 1, 2])
+gripper close
+("1_pick_rifle2", [3, 4]),  # 탄창 안전검사 이동
+("10_pick_rifle2", [9]),             # 탄창 안전검사
+("1_pick_rifle2", [5]),              # 종료 웨이포인트
+("1_pick_mag2", [3, 2, 1]),
+gripper open 
+("1_pick_mag2",[0]),       # 탄창 반납함 플레이스
+("1_pick_mag2", [3]),                # 웨이포인트
+
+# 총기 검사 준비
+("2_pick_rifle2", [0]),              # 안전검사 웨이포인트
+
+# 공통: 총기 기능 검사
+("Mag_Vision", [0, 1])
+gripper close
+("Mag_Vision",[2, 3, 4, 5, 6]
+gripper open
+"Mag_Vision", [ 7, 8, 9]) # 안전>단발, 노리쇠
+("Pick_Rifle", [0, 1, 2, 3, 4, 5, 6, 7, 8]), # 격발, 단발>안전
+gripper close
+("Pick_Rifle",[9])
+("Place_Rifle", [0,1]),            # 조정간 종료
+gripper open
+("Place_Rifle", [2]),  
+
+# 총기 반납 처리
+("10_pick_rifle2", [8]),             # 총기 픽 웨이포인트
+("2_pick_rifle2", [1, 2]),
+gripper close 
+("2_pick_rifle2",[3]),        # 총기 지그 픽
+("10_pick_rifle2", [7]),             # 웨이포인트
+("2_pick_rifle2",[4]),
+("10_place_gun2",[9]),
+("1_pick_gun2",[6, 7]),
+("1_pick_gun2",[ 3, 2, 1])
+gripper open
+("1_pick_gun2",[0]), #2번째 총 입고
+
+
+
+ ##반납 시퀀스
+ 1번
+
+("1_pick_rifle2", [0, 1, 2])
+gripper close
+("1_pick_rifle2", [3, 4]),   # 탄창 반납함
+("10_pick_rifle2", [9]),              # 탄창 안전검사
+("1_pick_rifle2", [5, 6, 7]),
+gripper open
+("1_pick_rifle2", [8, 9]),   # 탄창 보관함 플레이스
+
+# 총기 검사 준비
+("2_pick_rifle2", [0]),               # 안전검사 웨이포인트
+
+# 공통: 총기 기능 검사
+("Mag_Vision", [0, 1])
+gripper close
+("Mag_Vision",[2, 3, 4, 5, 6]
+gripper open
+"Mag_Vision", [ 7, 8, 9]) # 안전>단발, 노리쇠
+("Pick_Rifle", [0, 1, 2, 3, 4, 5, 6, 7, 8]), # 격발, 단발>안전
+gripper close
+("Pick_Rifle",[9])
+("Place_Rifle", [0,1]),            # 조정간 종료
+gripper open
+("Place_Rifle", [2]),  
+
+# 총기 반납 처리
+("10_pick_rifle2", [8]),              # 총기 픽 웨이포인트
+("2_pick_rifle2", [1, 2, 3]),         # 총기 지그 픽
+("10_pick_rifle2", [7]),              # 웨이포인트
+("2_pick_rifle2", [4, 5, 6]),         # 이동
+("10_pick_rifle2", [5, 6]),           # 웨이포인트
+("2_pick_rifle2", [8, 9]),            # 총기 플레이스

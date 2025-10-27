@@ -1093,7 +1093,6 @@ class MissionController:
 
     def _get_return_rifle1_pickup_sequence(self) -> List[Any]:
         return [
-            "go_mag2rifle_return",
             "go_selector1",
             ("go_selector2", "close"),
             "go_selector3",
@@ -1474,12 +1473,25 @@ class MissionController:
                         run_fn=lambda: self.exec_labels(self.block_pick_mag2, "pick mag2"),
                         preview_labels=self.block_pick_mag2
                     ))
+                mag_place_seq = [
+                    "go_mag_rail1",
+                    "go_mag_rail2",
+                    "go_mag_rail3_vision",
+                    "__VISION_MAG__",
+                    "go_mag_rail4",
+                    "go_mag_rail5",
+                    "go_mag_rail6",
+                    "pickdown_rail",
+                    "out_mag_rail1",
+                    "out_mag_rail2",
+                    "out_mag_rail3",
+                ]
+
                 def place_mag_on_rail_with_drop():
                     prev = self.gripper_actions.get("pickdown_rail", None)
                     self.gripper_actions["pickdown_rail"] = "open"
                     try:
-                        self.exec_labels(self.block_place_mag_on_rail,
-                                         "place mag on rail")
+                        self._run_sequence(mag_place_seq, "place mag on rail")
                     finally:
                         if prev is None:
                             self.gripper_actions.pop("pickdown_rail", None)
@@ -1490,7 +1502,7 @@ class MissionController:
                     "탄창 레일에 올리기",
                     "집은 탄창을 레일 위 지정 위치에 내려놓습니다.",
                     run_fn=place_mag_on_rail_with_drop,
-                    preview_labels=self.block_place_mag_on_rail
+                    preview_labels=self._sequence_labels(mag_place_seq)
                 ))
 
         # 공통: 종료 홈

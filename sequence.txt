@@ -221,7 +221,7 @@ gripper open
 
 
 ============================================공통
-2_pick_rifle2 [0] --> 2_pick_rifle2 [0]
+2_pick_rifle2 [0] --> go_mag2rifle_return
 
 Mag_Vision [0] --> go_selector1
 Mag_Vision [1] --> go_selector2
@@ -277,6 +277,169 @@ gripper close
 gripper open
 
 1_pick_gun2 [0] --> pick_rifle2
+
+
+
+
+
+
+
+
+1번 시퀀스
+
+go_pick_mag_return1
+--> grip_mag_return
+--> pickup_mag_return
+gripper close
+--> go_mag2vision1_return
+--> go_mag2vision2_return
+--> check_vision_mag_return
+--> go_vision2mag_return
+
+
+place_mag1_1_return
+--> place_mag1_2_return
+gripper open
+--> out_mag1_1_return
+--> out_mag1_2_return
+
+
+go_mag2rifle_return
+--> go_selector1
+--> go_selector2
+gripper close
+--> go_selector3
+--> spin_selector_semi
+--> out_selector1
+--> out_selector2
+--> go_cocking1
+gripper open
+
+--> go_cocking2
+-> go_cocking3
+--> cocking
+-> go_cocking3
+--> cocking
+-> go_cocking3
+--> cocking
+-> go_cocking3
+
+--> out_cocking1
+--> out_cocking2
+--> go_fire1
+--> go_fire2
+--> fire
+--> out_fire1
+--> out_fire2
+--> out_fire2selector
+--> go_selector_from_fire1
+gripper close
+
+-> go_selector_from_fire2
+--> spin_selector_safe
+--> out_selector_safe_end1
+gripper open
+--> out_selector_safe_end2
+
+
+rifle_pickgo1_return
+--> rifle_pickgo2_return
+--> rifle_pickgo3_return
+gripper close
+--> rifle_pickgo4_return
+
+--> rifle1_pickgo1_return
+--> rifle1_pickgo2_return
+--> rifle1_pickgo3_return
+--> rifle1_pickgo4_return
+--> rifle1_pickgo5_return
+--> rifle1_pickgo6_return
+gripper open
+--> rifle1_pickgo7_return
+
+
+
+2번시퀀스
+go_pick_mag_return1
+--> grip_mag_return
+--> pickup_mag_return
+gripper close
+--> go_mag2vision1_return
+--> go_mag2vision2_return
+--> check_vision_mag_return
+--> go_vision2mag_return
+
+
+out_mag2
+--> pickup_mag2
+--> grip_mag2
+gripper open 
+--> go_mag2
+--> out_mag2
+
+
+go_mag2rifle_return
+--> go_selector1
+--> go_selector2
+gripper close
+--> go_selector3
+--> spin_selector_semi
+--> out_selector1
+--> out_selector2
+--> go_cocking1
+gripper open
+--> go_cocking2
+--> go_cocking3
+--> cocking
+--> go_cocking3
+--> cocking
+--> go_cocking3
+--> cocking
+--> go_cocking3
+--> out_cocking1
+--> out_cocking2
+--> go_fire1
+--> go_fire2
+--> fire
+--> out_fire1
+--> out_fire2
+--> out_fire2selector
+--> go_selector_from_fire1
+gripper close
+--> go_selector_from_fire2
+--> spin_selector_safe
+--> out_selector_safe_end1
+gripper open
+--> out_selector_safe_end2
+
+
+rifle_pickgo1_return
+--> rifle_pickgo2_return
+--> rifle_pickgo3_return
+gripper close
+--> rifle_pickgo4_return
+
+
+rifle2_pickgo1_return
+--> rifle1_pickgo1_return
+--> rifle2_pickgo3_return
+
+rifle2_pickgo4_return
+--> rifle2_pickgo5_return
+--> up2_rifle2
+--> up1_rifle2
+--> grip_rifle2
+gripper open
+--> pick_rifle2
+
+
+
+
+
+
+
+
+
 
 
 

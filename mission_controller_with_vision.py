@@ -552,10 +552,48 @@ class MissionController:
         "go_pick_mag_return1", "o_mag2vision_return1", "go_mag2vision_return2",
         "check_vision_mag_return", "vision2mag_return",
         "place_mag1_return1", "place_mag1_return2",
-        "out_mag1_return2",
+        "out_mag1_return1", "out_mag1_return2", "out_mag1_return3",
+        "pick_mag_return", "go_pick_mag_return2",
+        "goto_place_return1", "goto_place_return2",
+        "go_grip_rifle1_return1 [0]", "go_grip_rifle1_return2",
+        "grip_rifle1_return", "out_grip_rifle1_return1", "out_grip_rifle1_return2",
+        "out_grip_rifle1_return3", "go_place_rifle1_return4",
+        "place_rifle1_return1", "place_rifle1_return2", "down_rifle1_return",
+        "out_return", "out_grip_rifle2_return2", "out_grip_rifle2_return4",
+        "2_pick_rifle2 [7]",
         # home
         "home_rdy",
     ]
+
+    LABEL_ALIASES = {
+        "grip_mag_return": "go_pick_mag_return2",
+        "pickup_mag_return": "pick_mag_return",
+        "go_mag2vision1_return": "o_mag2vision_return1",
+        "go_mag2vision2_return": "go_mag2vision_return2",
+        "go_vision2mag_return": "vision2mag_return",
+        "place_mag1_1_return": "place_mag1_return1",
+        "place_mag1_2_return": "place_mag1_return2",
+        "out_mag1_1_return": "out_mag1_return1",
+        "out_mag1_2_return": "out_mag1_return2",
+        "go_mag2rifle_return": "goto_place_return1",
+        "rifle_pickgo1_return": "go_grip_rifle1_return1 [0]",
+        "rifle_pickgo2_return": "go_grip_rifle1_return2",
+        "rifle_pickgo3_return": "grip_rifle1_return",
+        "rifle_pickgo4_return": "out_grip_rifle1_return1",
+        "rifle1_pickgo1_return": "out_grip_rifle1_return2",
+        "rifle1_pickgo2_return": "out_grip_rifle1_return3",
+        "rifle1_pickgo3_return": "go_place_rifle1_return4",
+        "rifle1_pickgo4_return": "place_rifle1_return1",
+        "rifle1_pickgo5_return": "place_rifle1_return2",
+        "rifle1_pickgo6_return": "down_rifle1_return",
+        "rifle1_pickgo7_return": "out_return",
+        "go_mag2rifle_return": "2_pick_rifle2 [7]",
+        "rifle2_pickgo1_return": "out_grip_rifle2_return2",
+        "rifle2_pickgo3_return": "out_grip_rifle2_return4",
+        "rifle2_pickgo4_return": "goto_place_return1",
+        "rifle2_pickgo5_return": "goto_place_return2",
+    }
+
 
     def __init__(self, mission_number: int, direction: str, with_mag: bool,
                  expected_qr: str = "1",
@@ -573,7 +611,8 @@ class MissionController:
         self.bridge_host = bridge_host
         self.enable_vision = enable_vision
 
-        self.positions = load_positions_by_label(TEACH_FILE, wanted=self.REQUIRED_LABELS)
+        self.positions = load_positions_by_label(TEACH_FILE)
+        self.label_aliases = dict(self.LABEL_ALIASES)
         missing = [lbl for lbl in self.REQUIRED_LABELS if lbl not in self.positions]
         if missing:
             print("[WARN] JSON에서 찾지 못한 라벨:", missing)
@@ -891,11 +930,15 @@ class MissionController:
             self.bc = None
             raise RuntimeError(f"브릿지({self.bridge_host}) 연결 실패: {e}")
 
+    def resolve_label(self, label: str) -> str:
+        return self.label_aliases.get(label, label)
+
     def move_to(self, label: str, desc: str = ""):
-        if label not in self.positions:
-            raise ValueError(f"라벨 '{label}'을 positions에서 찾을 수 없습니다.")
-        
-        pos_data = self.positions[label]
+        target_label = self.resolve_label(label)
+        if target_label not in self.positions:
+            raise ValueError(f"라벨 '{label}'(실제 '{target_label}')을 positions에서 찾을 수 없습니다.")
+
+        pos_data = self.positions[target_label]
         j6 = [
             pos_data.get("Joint1(deg)", 0.0),
             pos_data.get("Joint2(deg)", 0.0),
@@ -908,11 +951,15 @@ class MissionController:
         info_str = f"move_to('{label}')"
         if desc:
             info_str += f" - {desc}"
+        if target_label != label:
+            info_str += f" [alias→'{target_label}']"
         print(f"[이동] {info_str}")
         
         self.bc.movej(j6, blocking=True)
         
         action = self.gripper_actions.get(label)
+        if action is None and target_label != label:
+            action = self.gripper_actions.get(target_label)
         if action == "open":
             print(f"  → gripper OPEN at '{label}'")
             self.bc.gripper_open()
@@ -926,6 +973,37 @@ class MissionController:
         for lbl in labels:
             self.move_to(lbl, desc=f"in block '{block_name}'")
         print(f"[실행] {info} 완료.\n")
+
+    def _manual_gripper(self, action: Optional[str], label: str):
+        if action == "open":
+            print(f"  → gripper OPEN (sequence) at '{label}'")
+            self.bc.gripper_open()
+        elif action == "close":
+            print(f"  → gripper CLOSE (sequence) at '{label}'")
+            self.bc.gripper_close()
+
+    def _run_sequence(self, seq: List[Any], desc: str):
+        for entry in seq:
+            if isinstance(entry, tuple):
+                label, action = entry
+            else:
+                label, action = entry, None
+            if label == "__VISION_MAG__":
+                self.vision_check_mag()
+                continue
+            self.move_to(label, desc=desc)
+            if action:
+                self._manual_gripper(action, label)
+
+    @staticmethod
+    def _sequence_labels(seq: List[Any]) -> List[str]:
+        labels: List[str] = []
+        for entry in seq:
+            label = entry[0] if isinstance(entry, tuple) else entry
+            if label == "__VISION_MAG__":
+                continue
+            labels.append(label)
+        return labels
 
     # ----------------------------- 조정간/장전/격발 블록 -----------------------------
     def run_selector_single(self):
@@ -965,47 +1043,168 @@ class MissionController:
     def run_fire(self):
         self.exec_labels(self.block_fire_core, "fire")
 
+    # ----------------------------- 불입 프로세스 시퀀스 정의 -----------------------------
+    def _get_return_mag_pickup_sequence(self) -> List[Any]:
+        return [
+            "go_pick_mag_return1",
+            "grip_mag_return",
+            ("pickup_mag_return", "close"),
+            "go_mag2vision1_return",
+            "go_mag2vision2_return",
+            "__VISION_MAG__",
+            "go_vision2mag_return",
+        ]
+
+    def _get_return_mag_place_sequence(self) -> List[Any]:
+        if self.mission_number == 1:
+            return [
+                "place_mag1_1_return",
+                ("place_mag1_2_return", "open"),
+                "out_mag1_1_return",
+                "out_mag1_2_return",
+            ]
+        return [
+            "out_mag2",
+            "pickup_mag2",
+            ("grip_mag2", "open"),
+            "go_mag2",
+            "out_mag2",
+        ]
+
+    def _get_return_rifle1_pickup_sequence(self) -> List[Any]:
+        return [
+            "go_mag2rifle_return",
+            "go_selector1",
+            ("go_selector2", "close"),
+            "go_selector3",
+            "spin_selector_semi",
+            "out_selector1",
+            "out_selector2",
+            ("go_cocking1", "open"),
+            "go_cocking2",
+            "go_cocking3",
+            "cocking",
+            "go_cocking3",
+            "cocking",
+            "go_cocking3",
+            "cocking",
+            "go_cocking3",
+            "out_cocking1",
+            "out_cocking2",
+            "go_fire1",
+            "go_fire2",
+            "fire",
+            "out_fire1",
+            "out_fire2",
+            "out_fire2selector",
+            ("go_selector_from_fire1", "close"),
+            "go_selector_from_fire2",
+            "spin_selector_safe",
+            ("out_selector_safe_end1", "open"),
+            "out_selector_safe_end2",
+            "rifle_pickgo1_return",
+            "rifle_pickgo2_return",
+            ("rifle_pickgo3_return", "close"),
+            "rifle_pickgo4_return",
+        ]
+
+    def _get_return_rifle1_place_sequence(self) -> List[Any]:
+        return [
+            "rifle1_pickgo1_return",
+            "rifle1_pickgo2_return",
+            "rifle1_pickgo3_return",
+            "rifle1_pickgo4_return",
+            "rifle1_pickgo5_return",
+            ("rifle1_pickgo6_return", "open"),
+            "rifle1_pickgo7_return",
+        ]
+
+    def _get_return_rifle2_pickup_sequence(self) -> List[Any]:
+        return [
+            "2_pick_rifle2 [0]",
+            "go_selector1",
+            ("go_selector2", "close"),
+            "go_selector3",
+            "spin_selector_semi",
+            "out_selector1",
+            "out_selector2",
+            ("go_cocking1", "open"),
+            "go_cocking2",
+            "go_cocking3",
+            "cocking",
+            "go_cocking3",
+            "cocking",
+            "go_cocking3",
+            "cocking",
+            "go_cocking3",
+            "out_cocking1",
+            "out_cocking2",
+            "go_fire1",
+            "go_fire2",
+            "fire",
+            "out_fire1",
+            "out_fire2",
+            "out_fire2selector",
+            ("go_selector_from_fire1", "close"),
+            "go_selector_from_fire2",
+            "spin_selector_safe",
+            ("out_selector_safe_end1", "open"),
+            "out_selector_safe_end2",
+            "rifle_pickgo1_return",
+            "rifle_pickgo2_return",
+            ("rifle_pickgo3_return", "close"),
+            "rifle_pickgo4_return",
+            "rifle2_pickgo1_return",
+            "rifle1_pickgo1_return",
+            "rifle2_pickgo3_return",
+        ]
+
+    def _get_return_rifle2_place_sequence(self) -> List[Any]:
+        return [
+            "rifle2_pickgo4_return",
+            "rifle2_pickgo5_return",
+            "up2_rifle2",
+            "up1_rifle2",
+            ("grip_rifle2", "open"),
+            "pick_rifle2",
+        ]
+
     # ----------------------------- 불입 프로세스 블록 -----------------------------
     def return_mag_pickup_and_check(self):
         """탄창 집기 후 비전으로 이동 -> 우상탄 확인"""
         print("\n[불입-탄창] 탄창 집기 및 비전 위치 이동")
-        self.exec_labels(self.block_mag_to_vision, "mag->vision")
-        
-        # 비전 검사: 우상탄 확인
-        self.vision_check_mag()
-        
-        print("[불입-탄창] 비전 -> 탄창 보관소")
-        self.exec_labels(self.block_vision_to_mag, "vision->mag storage")
+        seq = self._get_return_mag_pickup_sequence()
+        self._run_sequence(seq, "return mag pickup/vision")
 
     def return_mag_place(self):
         """탄창을 보관함에 내려놓기"""
         print("\n[불입-탄창] 탄창 반납 배치")
-        if self.mission_number == 1:
-            self.exec_labels(self.block_place_mag_return, "place mag1 return")
-            self.move_to("out_mag1_return2", desc="final out mag1 return")
-        else:
-            self.exec_labels(self.block_place_mag_return, "place mag2 return")
-            self.move_to("out_mag1_return2", desc="final out mag2 return")
+        seq = self._get_return_mag_place_sequence()
+        self._run_sequence(seq, "return mag place")
 
     def return_rifle_1_pickup(self):
         """총기1 레일에서 집기"""
         print("\n[불입-총기1] 레일에서 집기")
-        self.exec_labels(self.block_return1_rifle_pickup, "pickup rifle1 from rail")
+        seq = self._get_return_rifle1_pickup_sequence()
+        self._run_sequence(seq, "return rifle1 pickup")
 
     def return_rifle_1_place(self):
         """총기1 보관함에 반납"""
         print("\n[불입-총기1] 보관함 반납")
-        self.exec_labels(self.block_return1_rifle_place, "place rifle1 return")
+        seq = self._get_return_rifle1_place_sequence()
+        self._run_sequence(seq, "return rifle1 place")
 
     def return_rifle_2_pickup(self):
         """총기2 레일에서 집기"""
         print("\n[불입-총기2] 레일에서 집기")
-        self.exec_labels(self.block_return2_rifle_pickup, "pickup rifle2 from rail")
+        seq = self._get_return_rifle2_pickup_sequence()
+        self._run_sequence(seq, "return rifle2 pickup")
 
     def return_rifle_2_place(self):
         """총기2 보관함에 반납"""
         print("\n[불입-총기2] 보관함 반납")
-        self.exec_labels(self.block_return2_rifle_place, "place rifle2 return")
+        seq = self._get_return_rifle2_place_sequence()
+        self._run_sequence(seq, "return rifle2 place")
 
     # ----------------------------- 스텝 빌드 -----------------------------
     def _run_steps(self, steps: List[Step]):
@@ -1096,15 +1295,13 @@ class MissionController:
                     "탄창 집기 및 방향 확인",
                     "레일에서 탄창을 집어 비전으로 이동 후 우상탄 여부를 확인합니다.",
                     run_fn=self.return_mag_pickup_and_check,
-                    preview_labels=self.block_retrieve_mag_from_rail + 
-                                  self.block_mag_to_vision + 
-                                  self.block_vision_to_mag
+                    preview_labels=self._sequence_labels(self._get_return_mag_pickup_sequence())
                 ))
                 steps.append(Step(
                     "탄창 반납",
                     "확인된 탄창을 보관함에 반납합니다.",
                     run_fn=self.return_mag_place,
-                    preview_labels=self.block_place_mag_return
+                    preview_labels=self._sequence_labels(self._get_return_mag_place_sequence())
                 ))
             
             # 총기 집기 및 반납
@@ -1113,26 +1310,26 @@ class MissionController:
                     "총기1 집기",
                     "레일에서 총기1을 집습니다.",
                     run_fn=self.return_rifle_1_pickup,
-                    preview_labels=self.block_return1_rifle_pickup
+                    preview_labels=self._sequence_labels(self._get_return_rifle1_pickup_sequence())
                 ))
                 steps.append(Step(
                     "총기1 반납",
                     "총기1을 보관함에 반납합니다.",
                     run_fn=self.return_rifle_1_place,
-                    preview_labels=self.block_return1_rifle_place
+                    preview_labels=self._sequence_labels(self._get_return_rifle1_place_sequence())
                 ))
             else:
                 steps.append(Step(
                     "총기2 집기",
                     "레일에서 총기2를 집습니다.",
                     run_fn=self.return_rifle_2_pickup,
-                    preview_labels=self.block_return2_rifle_pickup
+                    preview_labels=self._sequence_labels(self._get_return_rifle2_pickup_sequence())
                 ))
                 steps.append(Step(
                     "총기2 반납",
                     "총기2를 보관함에 반납합니다.",
                     run_fn=self.return_rifle_2_place,
-                    preview_labels=self.block_return2_rifle_place
+                    preview_labels=self._sequence_labels(self._get_return_rifle2_place_sequence())
                 ))
 
         else:

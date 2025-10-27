@@ -105,8 +105,12 @@ def _parse_dt(s: Optional[str]) -> datetime:
     return datetime.min
 
 def load_positions_by_label(fn: str, wanted: Optional[Iterable[str]] = None) -> Dict[str, Dict[str, Any]]:
-    with open(fn, "r", encoding="utf-8") as f:
-        raw = json.load(f)
+    try:
+        with open(fn, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except json.JSONDecodeError as e:
+        # teach JSON에 문법 오류가 있는 경우 보다 이해하기 쉬운 메시지 제공
+        raise ValueError(f"포지션 JSON 구문 오류({fn}): {e}") from e
     records = _extract_records(raw)
 
     buckets: Dict[str, List[dict]] = {}

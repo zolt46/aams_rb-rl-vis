@@ -350,7 +350,7 @@ rifle_pickgo1_return
 --> rifle_pickgo3_return
 gripper close
 --> rifle_pickgo4_return
-
+rifle2_pickgo1_return
 --> rifle1_pickgo1_return
 --> rifle1_pickgo2_return
 --> rifle1_pickgo3_return

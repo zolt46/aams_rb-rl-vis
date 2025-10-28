@@ -9,9 +9,14 @@ mission_controller_with_vision.py
   3) 탄창 방향 확인 (우상탄만 통과)
 """
 
+import argparse
 import json
+import queue
+import re
+import sys
 import time
 import threading
+import uuid
 import cv2
 import numpy as np
 import pyrealsense2 as rs
@@ -20,7 +25,7 @@ import math
 from collections import deque
 from PIL import Image, ImageFont, ImageDraw
 from pyzbar.pyzbar import decode as pyzbar_decode
-from typing import Dict, Any, List, Iterable, Optional, Callable, Tuple
+from typing import Dict, Any, List, Iterable, Optional, Callable, Tuple, Union
 from contextlib import contextmanager
 from datetime import datetime
 from robot_sdk_v13_rail_extended import BridgeClient
@@ -54,6 +59,151 @@ SELECTOR_CENTERS = {k: (v[0]+v[1])/2.0 for k, v in SELECTOR_RANGES.items()}
 MAG_N_CONSENSUS = 4  # 같은 판정 N프레임 연속
 MAG_THRESH_X_DIFF = 10.0
 MAG_THRESH_BOX_CONF = 0.50
+
+# ----------------------------- 브리지 인터페이스 -----------------------------
+class BridgeAbort(Exception):
+    """외부 인터랙션으로 집행이 중단된 경우"""
+
+
+class BridgeInterface:
+    def __init__(self, enabled: bool = False, context: dict | None = None):
+        self.enabled = bool(enabled)
+        self.context = dict(context or {})
+        self._waiters: dict[str, queue.Queue] = {}
+        self._early: dict[str, list[dict]] = {}
+        self._lock = threading.Lock()
+        self._listener: threading.Thread | None = None
+        self._running = False
+
+    def start(self) -> None:
+        if not self.enabled:
+            return
+        if self._listener and self._listener.is_alive():
+            return
+        self._running = True
+        self._listener = threading.Thread(target=self._listen_loop, daemon=True)
+        self._listener.start()
+
+    def stop(self) -> None:
+        if not self.enabled:
+            return
+        self._running = False
+
+    def emit(self, event: str, **payload) -> None:
+        if not self.enabled:
+            return
+        data = {"event": event, **payload}
+        request_id = self.context.get("request_id") or self.context.get("requestId")
+        if request_id and "requestId" not in data:
+            data["requestId"] = request_id
+        mission_label = self.context.get("mission_label")
+        if mission_label and "missionLabel" not in data:
+            data.setdefault("meta", {}).setdefault("missionLabel", mission_label)
+        try:
+            print(json.dumps(data, ensure_ascii=False), flush=True)
+        except Exception:
+            pass
+
+    def wait_for(self, stage: str, message: str, *, allow_cancel: bool = False, meta: dict | None = None) -> dict:
+        if not self.enabled:
+            return {}
+        token = uuid.uuid4().hex
+        queue_obj = self._register_waiter(token)
+        payload = {
+            "stage": stage,
+            "message": message,
+            "token": token,
+            "allowCancel": allow_cancel
+        }
+        if meta:
+            payload["meta"] = meta
+        self.emit("await_user", **payload)
+        try:
+            while self._running:
+                try:
+                    command = queue_obj.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                cmd = str(command.get("command") or "").strip().lower()
+                if cmd in {"resume", "continue", "ok", "next"}:
+                    self.emit("await_user_done", stage=stage, message=message, token=token, command=cmd)
+                    return command
+                if cmd in {"abort", "cancel", "stop"}:
+                    self.emit(
+                        "await_user_done",
+                        stage=stage,
+                        message="사용자 중단",
+                        token=token,
+                        command=cmd,
+                        aborted=True
+                    )
+                    raise BridgeAbort(command.get("reason") or "aborted")
+        finally:
+            self._unregister_waiter(token)
+        raise BridgeAbort("bridge_stopped")
+
+    def _register_waiter(self, token: str) -> queue.Queue:
+        q: queue.Queue = queue.Queue()
+        with self._lock:
+            self._waiters[token] = q
+            pending = self._early.pop(token, [])
+        for entry in pending:
+            q.put(entry)
+        return q
+
+    def _unregister_waiter(self, token: str) -> None:
+        with self._lock:
+            self._waiters.pop(token, None)
+
+    def _listen_loop(self) -> None:
+        while self._running:
+            try:
+                line = sys.stdin.readline()
+            except Exception:
+                break
+            if not line:
+                if not self._running:
+                    break
+                time.sleep(0.05)
+                continue
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            token = data.get("token")
+            if not token:
+                continue
+            with self._lock:
+                if token in self._waiters:
+                    self._waiters[token].put(data)
+                else:
+                    self._early.setdefault(token, []).append(data)
+
+
+def resolve_mission_number(raw_value: Optional[Union[int, str]], fallback_label: Optional[str] = None) -> int:
+    candidates = []
+    if raw_value is not None:
+        candidates.append(raw_value)
+    if fallback_label is not None:
+        candidates.append(fallback_label)
+    for candidate in candidates:
+        try:
+            value = int(candidate)
+            if value in (1, 2):
+                return value
+        except (TypeError, ValueError):
+            digits = ''.join(ch for ch in str(candidate) if ch.isdigit())
+            if digits:
+                try:
+                    value = int(digits)
+                    if value in (1, 2):
+                        return value
+                except ValueError:
+                    continue
+    return 1
 
 # ----------------------------- JSON 로드 -----------------------------
 JOINT_KEY_PATTERNS = (
@@ -606,7 +756,14 @@ class MissionController:
                  enable_vision: bool = True,
                  enable_qr_check: Optional[bool] = None,
                  enable_selector_check: Optional[bool] = None,
-                 enable_mag_check: Optional[bool] = None):
+                 enable_mag_check: Optional[bool] = None,
+                 *,
+                 bridge: Optional[BridgeInterface] = None,
+                 auto_mode: bool = False,
+                 mission_label: Optional[str] = None,
+                 request_id: Optional[str] = None,
+                 site: Optional[str] = None):
+        mission_number = resolve_mission_number(mission_number, mission_label)
         if mission_number not in (1, 2):
             raise ValueError("mission_number must be 1 or 2")
         if direction not in ("in", "out"):
@@ -621,6 +778,18 @@ class MissionController:
         self.enable_qr_check = enable_vision if enable_qr_check is None else enable_qr_check
         self.enable_selector_check = enable_vision if enable_selector_check is None else enable_selector_check
         self.enable_mag_check = enable_vision if enable_mag_check is None else enable_mag_check
+
+        self.bridge: BridgeInterface = bridge or BridgeInterface(enabled=False)
+        if mission_label:
+            self.bridge.context.setdefault("mission_label", mission_label)
+        if request_id:
+            self.bridge.context.setdefault("request_id", str(request_id))
+        if site:
+            self.bridge.context.setdefault("site", site)
+        self.auto_mode = bool(auto_mode or self.bridge.enabled)
+        self.mission_label = mission_label
+        self.request_id = request_id
+        self.site = site
 
         if not self.enable_vision:
             self.enable_qr_check = False
@@ -664,6 +833,36 @@ class MissionController:
         self._keepalive_thread: Optional[threading.Thread] = None
         self._keepalive_stop = threading.Event()
         self.mag_failure_handler: Optional[Callable[[], None]] = None
+
+    # ----------------------------- 브리지 유틸 -----------------------------
+    def _stage_key(self, text: Optional[str]) -> str:
+        base = (text or "").lower()
+        slug = re.sub(r"[^a-z0-9]+", "-", base).strip("-")
+        return slug or "stage"
+
+    def _emit_progress(self, stage: str, message: str, **extra) -> None:
+        if not self.bridge.enabled:
+            return
+        payload = {"stage": stage, "message": message}
+        if extra:
+            payload.update(extra)
+        self.bridge.emit("progress", **payload)
+
+    def _emit_log(self, stage: str, message: str, level: str = "info", **extra) -> None:
+        if not self.bridge.enabled:
+            return
+        payload = {"stage": stage, "message": message, "level": level}
+        if extra:
+            payload.update(extra)
+        self.bridge.emit("log", **payload)
+
+    def _emit_complete(self, status: str, message: str, **extra) -> None:
+        if not self.bridge.enabled:
+            return
+        payload = {"status": status, "stage": "completed", "message": message}
+        if extra:
+            payload.update(extra)
+        self.bridge.emit("complete", **payload)
 
     # ----------------------------- Keep-Alive -----------------------------
     def _send_keepalive(self):
@@ -771,9 +970,23 @@ class MissionController:
         else:
             print(f"[RAIL] 레일이 이미 외부({current_pos:.1f}mm) 위치에 있습니다. 유지 대기합니다.")
 
-        print(f"[RAIL] 외부 위치에서 {wait_seconds:.1f}초 대기합니다...")
-        time.sleep(wait_seconds)
-        print("[RAIL] 대기 완료.")
+        stage_key = self._stage_key("rail_outside")
+        self._emit_progress(stage_key, "레일 외부 위치 확보", position=current_pos)
+        if self.auto_mode:
+            prompt = "레일 위에 총기와 탄약을 올리고 준비가 되면 단말에서 확인 버튼을 눌러주세요."
+            try:
+                self.bridge.wait_for("return_load", prompt, meta={
+                    "direction": self.direction,
+                    "mission": self.mission_number,
+                    "withMag": self.with_mag
+                })
+            except BridgeAbort:
+                raise
+        else:
+            print(f"[RAIL] 외부 위치에서 {wait_seconds:.1f}초 대기합니다...")
+            time.sleep(wait_seconds)
+            print("[RAIL] 대기 완료.")
+        self._emit_progress(stage_key, "사용자 준비 완료", completed=True)
 
     # ----------------------------- 비전 검사 래퍼 -----------------------------
     def vision_check_qr(self):
@@ -812,21 +1025,63 @@ class MissionController:
         print("\n" + "="*60)
         print("[비전 검사] 조정간 안전 상태 확인")
         print("="*60)
-        
-        is_safe, message = self.vision.check_selector_safe(display=True)
-        print(f"[VISION] {message}")
-        
-        if not is_safe:
-            print("\n" + "!"*60)
-            print("[경고] 조정간이 안전 상태가 아닙니다!")
-            print("!"*60)
-            print("[조치] 총기를 반출합니다...")
-            
-            # 반출 프로세스 실행
-            self._execute_return_process(cycle_back=True)
-            raise RuntimeError(f"조정간 안전 검사 실패: {message}")
-        
-        print("[VISION] ✓ 조정간 안전 상태 확인 완료\n")
+        stage_key = self._stage_key("selector_check")
+
+        if self.auto_mode:
+            attempt = 0
+            while True:
+                attempt += 1
+                is_safe, message = self.vision.check_selector_safe(display=True)
+                print(f"[VISION] {message}")
+                self._emit_progress(stage_key, message, attempt=attempt)
+                if is_safe:
+                    success_msg = "조정간 SAFE 확인 완료"
+                    print(f"[VISION] ✓ {success_msg}\n")
+                    self._emit_progress(stage_key, success_msg, attempt=attempt, completed=True)
+                    return
+
+                warn_msg = "조정간이 안전 상태가 아닙니다!"
+                print("\n" + "!"*60)
+                print(f"[경고] {warn_msg}")
+                print("!"*60)
+                self._emit_log(stage_key, message, level='warning', attempt=attempt)
+
+                try:
+                    self.rail_extend()
+                except Exception as err:
+                    self._emit_log(stage_key, f"레일 배출 실패: {err}", level='error', attempt=attempt)
+                    raise
+
+                try:
+                    self.bridge.wait_for(
+                        "selector_retry",
+                        "조정간을 SAFE 위치로 맞춘 뒤 단말의 버튼을 눌러주세요.",
+                        allow_cancel=True,
+                        meta={"attempt": attempt}
+                    )
+                except BridgeAbort:
+                    raise
+
+                try:
+                    self.rail_retract()
+                except Exception as err:
+                    self._emit_log(stage_key, f"레일 인입 실패: {err}", level='error', attempt=attempt)
+                    raise
+        else:
+            is_safe, message = self.vision.check_selector_safe(display=True)
+            print(f"[VISION] {message}")
+
+            if not is_safe:
+                print("\n" + "!"*60)
+                print("[경고] 조정간이 안전 상태가 아닙니다!")
+                print("!"*60)
+                print("[조치] 총기를 반출합니다...")
+
+                # 반출 프로세스 실행
+                self._execute_return_process(cycle_back=True)
+                raise RuntimeError(f"조정간 안전 검사 실패: {message}")
+
+            print("[VISION] ✓ 조정간 안전 상태 확인 완료\n")
 
     def vision_check_mag(self):
         """탄창 방향 검사 - 우상탄 아니면 프로세스 정지"""
@@ -841,12 +1096,28 @@ class MissionController:
         
         is_correct, message = self.vision.check_mag_orientation(display=True)
         print(f"[VISION] {message}")
-        
+        stage_key = self._stage_key("mag_check")
+        self._emit_progress(stage_key, message)
+
         if not is_correct:
             print("\n" + "!"*60)
             print("[경고] 탄창 방향이 올바르지 않습니다!")
             print("!"*60)
             print("[조치] 탄창을 원위치에 복귀하고 로봇을 정지합니다.")
+
+            if self.bridge.enabled and "좌상탄" in message:
+                self.bridge.emit(
+                    "lockdown",
+                    stage="mag_check",
+                    message=message,
+                    reason="left_round_detected",
+                    meta={
+                        "direction": self.direction,
+                        "mission": self.mission_number,
+                        "withMag": self.with_mag
+                    }
+                )
+                raise BridgeAbort("좌상탄 감지")
 
             if self.mag_failure_handler:
                 try:
@@ -858,8 +1129,10 @@ class MissionController:
             else:
                 print("[경고] 복귀 시퀀스가 설정되어 있지 않습니다. 수동으로 복구하세요.")
             raise RuntimeError(f"탄창 방향 검사 실패: {message}")
-        
-        print("[VISION] ✓ 탄창 방향 확인 완료 (우상탄)\n")
+
+        success_msg = "탄창 방향 확인 완료 (우상탄)"
+        print(f"[VISION] ✓ {success_msg}\n")
+        self._emit_progress(stage_key, success_msg, completed=True)
 
     def _execute_return_process(self, cycle_back: bool = True):
         """검사 실패 시 총기 반출 프로세스"""
@@ -1385,6 +1658,30 @@ class MissionController:
             else:
                 print("[경고] 잘못된 입력입니다. 단계를 스킵합니다.")
 
+    def _run_steps_auto(self, steps: List[Step]):
+        total = len(steps)
+        for idx, step in enumerate(steps, start=1):
+            stage_key = self._stage_key(step.title or f"step-{idx}")
+            print("\n" + "="*60)
+            print(f"[단계 {idx}/{total}] {step.title}")
+            print("="*60)
+            print(f"설명: {step.description}")
+            if step.preview_labels:
+                print(f"관련 라벨: {', '.join(step.preview_labels)}")
+
+            self._emit_progress(stage_key, step.description or step.title or f"단계 {idx}", index=idx, total=total, title=step.title)
+            try:
+                step.run_fn()
+                print(f"[완료] 단계 {idx} 완료.")
+                self._emit_progress(stage_key, f"{step.title} 완료", index=idx, total=total, title=step.title, completed=True)
+            except BridgeAbort:
+                raise
+            except Exception as e:
+                err_msg = f"단계 {idx} 실행 중 오류: {e}"
+                print(f"[오류] {err_msg}")
+                self._emit_log(stage_key, err_msg, level='error', index=idx, total=total)
+                raise
+
     def build_steps(self) -> List[Step]:
         steps = []
         
@@ -1627,7 +1924,16 @@ class MissionController:
 
     # ----------------------------- 메인 실행 -----------------------------
     def run(self):
+        stage_meta = {
+            "direction": self.direction,
+            "mission": self.mission_number,
+            "withMag": self.with_mag
+        }
         try:
+            self.bridge.start()
+            init_stage = self._stage_key("initialize")
+            self._emit_progress(init_stage, "장비 연결 준비", meta=stage_meta)
+
             # 로봇 연결
             self.connect_bridge()
             self.start_keepalive()
@@ -1636,6 +1942,7 @@ class MissionController:
             
             # 비전 초기화
             if self.any_vision_check:
+                self._emit_progress(self._stage_key("vision_setup"), "비전 시스템 초기화", meta=stage_meta)
                 self.vision = VisionController()
                 self.vision.initialize()
             else:
@@ -1643,14 +1950,31 @@ class MissionController:
 
             steps = self.build_steps()
             print("\n[GUIDE] 단계별 실행이 시작됩니다. 각 단계는 실행 전 미리보기를 제공합니다.")
-            self._run_steps(steps)
+            if self.auto_mode:
+                self._run_steps_auto(steps)
+            else:
+                self._run_steps(steps)
+            self._emit_complete('success', "미션이 완료되었습니다.", meta=stage_meta)
 
+        except BridgeAbort as abort_exc:
+            message = str(abort_exc) or "사용자 중단"
+            self._emit_log(self._stage_key("aborted"), message, level='error', meta=stage_meta)
+            self._emit_complete('error', message, meta=stage_meta)
+            print(f"\n[중단] {message}")
+            raise
         except KeyboardInterrupt:
-            print("\n[중단] 사용자가 프로그램을 중단했습니다.")
+            message = "사용자가 프로그램을 중단했습니다."
+            self._emit_log(self._stage_key("keyboard"), message, level='error', meta=stage_meta)
+            self._emit_complete('error', message, meta=stage_meta)
+            print(f"\n[중단] {message}")
         except Exception as e:
-            print(f"[ERROR] 미션 실행 중 오류: {e}")
+            err_msg = f"미션 실행 중 오류: {e}"
+            self._emit_log(self._stage_key("error"), err_msg, level='error', meta=stage_meta)
+            self._emit_complete('error', err_msg, meta=stage_meta)
+            print(f"[ERROR] {err_msg}")
             import traceback
             traceback.print_exc()
+            raise
         finally:
             self.stop_keepalive()
             if self.vision:
@@ -1660,12 +1984,62 @@ class MissionController:
                     self.bc.close()
                 except Exception:
                     pass
+            self.bridge.stop()
             print("[완료] 미션 컨트롤러 종료.")
 
 
 # ----------------------------- 메인 엔트리 -----------------------------
 if __name__ == "__main__":
-    import sys
+    parser = argparse.ArgumentParser(description="비전 통합 미션 컨트롤러")
+    parser.add_argument("--mission", type=int, help="미션 번호 (1 또는 2)")
+    parser.add_argument("--mission-label", help="미션/보관함 레이블")
+    parser.add_argument("--direction", choices=["in", "out"], help="불입(in) 또는 불출(out)")
+    parser.add_argument("--with-mag", action="store_true", help="탄창 포함 여부")
+    parser.add_argument("--expected-qr", help="QR 기대값")
+    parser.add_argument("--bridge-host", default="192.168.1.23", help="브릿지 호스트 주소")
+    parser.add_argument("--bridge-mode", action="store_true", help="브릿지 자동 모드 활성화")
+    parser.add_argument("--auto", action="store_true", help="자동 실행 모드")
+    parser.add_argument("--request-id", help="요청 ID")
+    parser.add_argument("--site", help="사이트 식별자")
+    parser.add_argument("--interactive", action="store_true", help="강제로 인터랙티브 모드 사용")
+
+    args = parser.parse_args()
+
+    auto_requested = args.bridge_mode or args.auto or args.mission is not None or args.direction or args.with_mag or args.expected_qr or args.request_id
+
+    if auto_requested and not args.interactive:
+        mission_num = resolve_mission_number(args.mission, args.mission_label)
+        direction = args.direction or "out"
+        with_mag = bool(args.with_mag)
+        expected_qr = args.expected_qr or (args.request_id if direction == "in" and args.request_id else str(mission_num))
+        bridge = BridgeInterface(enabled=args.bridge_mode, context={
+            "request_id": args.request_id,
+            "mission_label": args.mission_label,
+            "site": args.site
+        })
+        controller = MissionController(
+            mission_number=mission_num,
+            direction=direction,
+            with_mag=with_mag,
+            expected_qr=expected_qr,
+            bridge_host=args.bridge_host,
+            enable_vision=True,
+            enable_qr_check=False,
+            enable_selector_check=True,
+            enable_mag_check=True,
+            bridge=bridge,
+            auto_mode=True,
+            mission_label=args.mission_label,
+            request_id=args.request_id,
+            site=args.site
+        )
+        try:
+            controller.run()
+        except BridgeAbort:
+            sys.exit(2)
+        except Exception:
+            sys.exit(1)
+        sys.exit(0)
 
     print("="*60)
     print("    비전 통합 미션 컨트롤러")
@@ -1714,11 +2088,6 @@ if __name__ == "__main__":
     enable_qr_check = False
     enable_selector_check = True
     enable_mag_check = True
-    def ask_yes_no(prompt: str, default: bool = True) -> bool:
-        raw = input(prompt).strip().lower()
-        if not raw:
-            return default
-        return raw.startswith('y')
 
     # 브릿지 호스트 (옵션)
     bridge_host = input("브릿지 호스트 (기본=192.168.1.23): ").strip()
@@ -1744,8 +2113,7 @@ if __name__ == "__main__":
     if confirm != "y":
         print("[중단] 사용자가 취소했습니다.")
         sys.exit(0)
-    
-    # 미션 컨트롤러 실행
+
     controller = MissionController(
         mission_number=mission_num,
         direction=direction,
@@ -1755,7 +2123,11 @@ if __name__ == "__main__":
         enable_vision=enable_vision,
         enable_qr_check=enable_qr_check,
         enable_selector_check=enable_selector_check,
-        enable_mag_check=enable_mag_check
+        enable_mag_check=enable_mag_check,
+        mission_label=None,
+        request_id=None,
+        bridge=BridgeInterface(enabled=False),
+        auto_mode=False
     )
     
     controller.run()

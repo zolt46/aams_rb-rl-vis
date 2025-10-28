@@ -933,13 +933,73 @@ class MissionController:
             print("[RAIL] 레일이 이미 HOME 위치에 있습니다.")
 
     def rail_retract(self):
-        print("[RAIL] 레일 인입 시작...")
-        result = self.bc.rail_home(speed=RAIL_HOME_SPEED, wait=True)
-        if result.get("ok"):
-            print(f"[RAIL] ✓ 레일 인입 완료. 위치: {result.get('current_position')}mm")
-        else:
-            print(f"[RAIL] ✗ 레일 인입 실패: {result.get('err')}")
-            raise RuntimeError("레일 인입 실패")
+        stage_key = self._stage_key("레일 인입")
+        attempt = 1
+        while True:
+            print(f"[RAIL] 레일 인입 시도 #{attempt}...")
+            result = self.bc.rail_home(speed=RAIL_HOME_SPEED, wait=True)
+            if result.get("ok"):
+                current_pos = result.get("current_position")
+                print(f"[RAIL] ✓ 레일 인입 완료. 위치: {current_pos}mm")
+                if self.bridge.enabled:
+                    self._emit_progress(stage_key, "레일 인입 완료", attempt=attempt, position=current_pos)
+                return
+
+            err = result.get("err") or "알 수 없는 오류"
+            print(f"[RAIL] ✗ 레일 인입 실패: {err}")
+            if not (self.auto_mode and self.bridge.enabled):
+                raise RuntimeError("레일 인입 실패")
+
+            self._emit_log(stage_key, f"레일 인입 실패: {err}", level="error", attempt=attempt)
+            self._emit_progress(stage_key, "레일 인입 실패 - 사용자 확인 대기", attempt=attempt, error=err)
+
+            # 레일을 다시 외부 위치로 이동시켜 사용자가 상태를 점검할 수 있도록 한다.
+            try:
+                extend_result = self.bc.rail_move_to(
+                    position=RAIL_MAX_STROKE,
+                    speed=RAIL_FORWARD_SPEED,
+                    wait=True
+                )
+                if extend_result.get("ok"):
+                    self._emit_progress(
+                        stage_key,
+                        "레일을 다시 외부 위치로 이동했습니다.",
+                        attempt=attempt,
+                        position=extend_result.get("current_position")
+                    )
+                else:
+                    self._emit_log(
+                        stage_key,
+                        f"레일 외부 재이동 실패: {extend_result.get('err')}",
+                        level="warning",
+                        attempt=attempt
+                    )
+            except Exception as extend_exc:
+                self._emit_log(
+                    stage_key,
+                    f"레일 외부 재이동 중 예외: {extend_exc}",
+                    level="warning",
+                    attempt=attempt
+                )
+
+            prompt = (
+                "레일 인입에 실패했습니다. 장애물을 확인한 뒤 단말의 '다시 시도' 버튼을 눌러주세요."
+            )
+            meta = {
+                "attempt": attempt,
+                "error": err,
+                "direction": self.direction,
+                "mission": self.mission_number,
+                "withMag": self.with_mag,
+                "buttonLabel": "다시 시도"
+            }
+            try:
+                self.bridge.wait_for("rail_retract_retry", prompt, allow_cancel=True, meta=meta)
+            except BridgeAbort:
+                raise
+
+            attempt += 1
+            time.sleep(0.5)
 
     def rail_extend(self):
         print("[RAIL] 레일 배출 시작...")

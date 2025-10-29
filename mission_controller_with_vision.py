@@ -346,13 +346,15 @@ def classify_selector_angle(angle):
             best = s
     return best
 
-def check_selector_safe(model, frame, max_attempts=30, display=True) -> Tuple[bool, str]:
+def check_selector_safe(model, frame, max_attempts=30, display=True, confirm_frames=3) -> Tuple[bool, str]:
     """
     조정간이 SAFE 상태인지 확인
     Returns: (is_safe, message)
     """
     print("[VISION] 조정간 안전 상태 확인 중...")
-    
+
+    not_safe_count = 0
+    last_state_message = "조정간 상태 확인 중"
     for attempt in range(max_attempts):
         vis = frame.copy() if display else None
         
@@ -406,17 +408,29 @@ def check_selector_safe(model, frame, max_attempts=30, display=True) -> Tuple[bo
             cv2.imshow("Selector Check", vis)
             cv2.waitKey(50)
         
-        if detected and is_safe:
-            if display:
-                cv2.destroyWindow("Selector Check")
-            return True, f"조정간 SAFE 확인 완료 (각도: {angle:.1f}도)"
-        
-        time.sleep(0.1)
-    
+        if detected:
+            if is_safe:
+                if display:
+                    cv2.destroyWindow("Selector Check")
+                return True, f"조정간 SAFE 확인 완료 (각도: {angle:.1f}도)"
+            else:
+                not_safe_count += 1
+                last_state_message = f"조정간이 SAFE가 아닙니다. 현재 상태: {current_state} (각도: {angle:.1f}도)"
+                if not_safe_count >= max(1, confirm_frames):
+                    if display:
+                        cv2.destroyWindow("Selector Check")
+                    return False, last_state_message
+        else:
+            not_safe_count = 0
+
+        time.sleep(0.05)
+
     if display:
         cv2.destroyWindow("Selector Check")
-    
-    return False, f"조정간이 SAFE 상태가 아닙니다. 현재 상태: {current_state}"
+
+    if not_safe_count:
+        return False, last_state_message
+    return False, "조정간을 감지하지 못했습니다."
 
 # ----------------------------- 탄창 비전 검사 -----------------------------
 def center_of_box(x1, y1, x2, y2):
@@ -932,6 +946,56 @@ class MissionController:
         else:
             print("[RAIL] 레일이 이미 HOME 위치에 있습니다.")
 
+    def _execute_lockdown_recovery(self, stage: str, reason: str, meta: Optional[dict] = None) -> None:
+        info_meta = meta or {}
+        self._emit_log(stage, "락다운 복구 절차 실행", level='warning', meta=info_meta)
+        print("\n[LOCKDOWN] 자동 복구 절차를 시작합니다...")
+        try:
+            if self.with_mag:
+                try:
+                    self.rail_ensure_extended()
+                except Exception as err:
+                    self._emit_log(stage, f"레일 배출 실패: {err}", level='error', meta=info_meta)
+                    print(f"[LOCKDOWN] 레일 배출 중 오류: {err}")
+                try:
+                    self._recover_mag_failure_outbound()
+                    self._emit_log(stage, "탄창을 원위치에 복귀했습니다.", level='info', meta=info_meta)
+                except Exception as err:
+                    self._emit_log(stage, f"탄창 복귀 실패: {err}", level='error', meta=info_meta)
+                    print(f"[LOCKDOWN] 탄창 복귀 중 오류: {err}")
+            try:
+                self.bc.gripper_open()
+            except Exception as err:
+                self._emit_log(stage, f"그리퍼 개방 실패: {err}", level='warning', meta=info_meta)
+            try:
+                self.move_to(self.home_label, desc="lockdown home")
+                self._emit_log(stage, "로봇을 home_rdy 자세로 이동했습니다.", level='info', meta=info_meta)
+            except Exception as err:
+                self._emit_log(stage, f"home_rdy 이동 실패: {err}", level='error', meta=info_meta)
+                print(f"[LOCKDOWN] home_rdy 이동 중 오류: {err}")
+            try:
+                self.rail_ensure_home()
+            except Exception as err:
+                self._emit_log(stage, f"레일 인입 실패: {err}", level='warning', meta=info_meta)
+        finally:
+            print("[LOCKDOWN] 복구 절차 종료. 관리자 해제를 기다립니다.")
+
+    def _trigger_lockdown(self, stage: str, message: str, reason: str, meta: Optional[dict] = None) -> None:
+        payload = dict(meta or {})
+        payload.setdefault("timestamp", datetime.utcnow().isoformat())
+        payload.setdefault("mission", self.mission_number)
+        payload.setdefault("direction", self.direction)
+        payload.setdefault("withMag", self.with_mag)
+        if self.bridge.enabled:
+            self.bridge.emit(
+                "lockdown",
+                stage=stage,
+                message=message,
+                reason=reason,
+                meta=payload
+            )
+        self._execute_lockdown_recovery(stage, reason, payload)
+
     def rail_retract(self):
         stage_key = self._stage_key("레일 인입")
         attempt = 1
@@ -1165,9 +1229,8 @@ class MissionController:
             print("!"*60)
             print("[조치] 탄창을 원위치에 복귀하고 로봇을 정지합니다.")
 
-            if self.bridge.enabled and "좌상탄" in message:
-                self.bridge.emit(
-                    "lockdown",
+            if "좌상탄" in message:
+                self._trigger_lockdown(
                     stage="mag_check",
                     message=message,
                     reason="left_round_detected",

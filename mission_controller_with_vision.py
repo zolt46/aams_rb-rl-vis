@@ -1112,6 +1112,31 @@ class MissionController:
             print("[RAIL] 대기 완료.")
         self._emit_progress(stage_key, "사용자 준비 완료", completed=True)
 
+    def rail_wait_for_user_retract(self):
+        print("[RAIL] 사용자 회수 대기 - 레일을 외부에서 유지합니다.")
+        stage_key = self._stage_key("rail_user_retract_wait")
+        self._emit_progress(stage_key, "사용자 회수 대기", position=RAIL_MAX_STROKE)
+
+        prompt = (
+            "총기와 탄창을 회수한 뒤 단말의 '레일 인입' 버튼을 눌러주세요."
+        )
+        meta = {
+            "direction": self.direction,
+            "mission": self.mission_number,
+            "withMag": self.with_mag,
+            "buttonLabel": "레일 인입"
+        }
+
+        if self.auto_mode:
+            try:
+                self.bridge.wait_for("rail_user_retract", prompt, meta=meta)
+            except BridgeAbort:
+                raise
+        else:
+            input("\n총기와 탄창을 회수했다면 엔터를 눌러 레일을 인입하세요...")
+
+        self._emit_progress(stage_key, "사용자 회수 확인", completed=True)
+
     # ----------------------------- 비전 검사 래퍼 -----------------------------
     def vision_check_qr(self):
         """QR 코드 검사 - 불일치 시 프로세스 중단 및 반출"""
@@ -2033,16 +2058,43 @@ class MissionController:
             run_fn=lambda: self.move_to(self.home_label, desc="end home"),
             preview_labels=[self.home_label]
         ))
-        
-        # 불출일 경우 마지막에 레일 배출
+
         if self.direction == "out":
             steps.append(Step(
-                "레일 최종 배출",
-                "모든 작업이 완료되었습니다. 레일을 외부로 배출합니다.",
+                "레일 사용자 인계",
+                "모든 작업이 완료되었습니다. 레일을 외부로 배출해 사용자가 장비를 회수하도록 합니다.",
                 run_fn=self.rail_extend,
                 preview_labels=[]
             ))
-        
+            steps.append(Step(
+                "사용자 회수 대기",
+                "사용자가 총기 및 탄창을 회수할 때까지 레일을 외부에서 유지합니다.",
+                run_fn=self.rail_wait_for_user_retract,
+                preview_labels=[]
+            ))
+            steps.append(Step(
+                "레일 최종 인입",
+                "사용자 확인 후 레일을 HOME(0mm) 위치로 인입합니다.",
+                run_fn=self.rail_retract,
+                preview_labels=[]
+            ))
+        else:
+            steps.append(Step(
+                "레일 최종 정리",
+                "작업 종료 후 레일을 HOME(0mm) 위치로 정리합니다.",
+                run_fn=self.rail_ensure_home,
+                preview_labels=[]
+            ))
+
+        # 최종적으로 레일 위치를 확인하여 모든 태스크 종료 시 HOME을 유지한다.
+        if self.direction == "out":
+            steps.append(Step(
+                "레일 위치 확인",
+                "마지막으로 레일이 HOME(0mm) 위치에 있는지 확인합니다.",
+                run_fn=self.rail_ensure_home,
+                preview_labels=[]
+            ))
+
         return steps
 
     # ----------------------------- 메인 실행 -----------------------------

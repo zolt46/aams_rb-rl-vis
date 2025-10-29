@@ -75,6 +75,8 @@ class BridgeInterface:
         self.context = dict(context or {})
         self._waiters: Dict[str, queue.Queue] = {}
         self._early: Dict[str, List[dict]] = {}
+        self._event_waiters: Dict[str, List[queue.Queue]] = {}
+        self._early_events: Dict[str, List[dict]] = {}
         self._lock = threading.Lock()
         self._listener: Optional[threading.Thread] = None
         self._running = False
@@ -159,6 +161,39 @@ class BridgeInterface:
         with self._lock:
             self._waiters.pop(token, None)
 
+    def wait_for_event(self, event_name: str, timeout: Optional[float] = None) -> Optional[dict]:
+        if not self.enabled:
+            if timeout:
+                try:
+                    time.sleep(timeout)
+                except Exception:
+                    pass
+            return None
+        if not event_name:
+            return None
+        queue_obj: queue.Queue = queue.Queue()
+        with self._lock:
+            early = self._early_events.get(event_name)
+            if early:
+                event = early.pop(0)
+                if not early:
+                    self._early_events.pop(event_name, None)
+                return event
+            waiters = self._event_waiters.setdefault(event_name, [])
+            waiters.append(queue_obj)
+        try:
+            return queue_obj.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        finally:
+            with self._lock:
+                waiters = self._event_waiters.get(event_name)
+                if waiters and queue_obj in waiters:
+                    waiters.remove(queue_obj)
+                    if not waiters:
+                        self._event_waiters.pop(event_name, None)
+
+
     def _listen_loop(self) -> None:
         while self._running:
             try:
@@ -185,6 +220,16 @@ class BridgeInterface:
                     self._waiters[token].put(data)
                 else:
                     self._early.setdefault(token, []).append(data)
+            event_name = data.get("event")
+            if event_name:
+                with self._lock:
+                    event_waiters = list(self._event_waiters.get(event_name, []))
+                if event_waiters:
+                    for waiter in event_waiters:
+                        waiter.put(data)
+                else:
+                    with self._lock:
+                        self._early_events.setdefault(event_name, []).append(data)
 
 
 def resolve_mission_number(raw_value: Optional[Union[int, str]], fallback_label: Optional[str] = None) -> int:
@@ -844,6 +889,8 @@ class MissionController:
         self.bc: BridgeClient = None
         self.vision: VisionController = None
         self.gripper_actions: Dict[str, str] = {}
+        self.lockdown_active = False
+        self._lockdown_meta: Dict[str, Any] = {}
 
         self._define_blocks()
         self._setup_default_gripper_policy()
@@ -952,37 +999,27 @@ class MissionController:
 
     def _execute_lockdown_recovery(self, stage: str, reason: str, meta: Optional[dict] = None) -> None:
         info_meta = meta or {}
-        self._emit_log(stage, "락다운 복구 절차 실행", level='warning', meta=info_meta)
-        print("\n[LOCKDOWN] 자동 복구 절차를 시작합니다...")
+        self._emit_log(stage, "락다운 해제 후 복구 절차를 시작합니다.", level='info', meta=info_meta)
+        print("\n[LOCKDOWN] 관리자 해제 신호를 수신했습니다. 복구 절차를 실행합니다...")
         try:
-            if self.with_mag:
-                try:
-                    self.bc.gripper_close()
-                except Exception as err:
-                    self._emit_log(stage, f"그리퍼 상태 확인 실패: {err}", level='warning', meta=info_meta)
-                    print(f"[LOCKDOWN] 그리퍼 확인 중 오류: {err}")
-                try:
-                    self._recover_mag_failure_outbound()
-                    self._emit_log(stage, "탄창을 원위치에 복귀했습니다.", level='info', meta=info_meta)
-                except Exception as err:
-                    self._emit_log(stage, f"탄창 복귀 실패: {err}", level='error', meta=info_meta)
-                    print(f"[LOCKDOWN] 탄창 복귀 중 오류: {err}")
-            try:
-                self.bc.gripper_open()
-            except Exception as err:
-                self._emit_log(stage, f"그리퍼 개방 실패: {err}", level='warning', meta=info_meta)
             try:
                 self.move_to(self.home_label, desc="lockdown home")
                 self._emit_log(stage, "로봇을 home_rdy 자세로 이동했습니다.", level='info', meta=info_meta)
             except Exception as err:
-                self._emit_log(stage, f"home_rdy 이동 실패: {err}", level='error', meta=info_meta)
+                self._emit_log(stage, f"home_rdy 이동 실패: {err}", level='warning', meta=info_meta)
                 print(f"[LOCKDOWN] home_rdy 이동 중 오류: {err}")
+            try:
+                self.bc.gripper_open()
+                self._emit_log(stage, "그리퍼를 개방했습니다.", level='info', meta=info_meta)
+            except Exception as err:
+                self._emit_log(stage, f"그리퍼 개방 실패: {err}", level='warning', meta=info_meta)
+                print(f"[LOCKDOWN] 그리퍼 개방 중 오류: {err}")
             try:
                 self.rail_ensure_home()
             except Exception as err:
                 self._emit_log(stage, f"레일 인입 실패: {err}", level='warning', meta=info_meta)
         finally:
-            print("[LOCKDOWN] 복구 절차 종료. 관리자 해제를 기다립니다.")
+            print("[LOCKDOWN] 복구 절차가 완료되었습니다.")
 
     def _trigger_lockdown(self, stage: str, message: str, reason: str, meta: Optional[dict] = None) -> None:
         payload = dict(meta or {})
@@ -990,6 +1027,14 @@ class MissionController:
         payload.setdefault("mission", self.mission_number)
         payload.setdefault("direction", self.direction)
         payload.setdefault("withMag", self.with_mag)
+        self.lockdown_active = True
+        self._lockdown_meta = payload
+        if self.bc:
+            try:
+                self.bc.stop()
+            except Exception as err:
+                print(f"[LOCKDOWN] 로봇 정지 명령 실패: {err}")
+        print("\n[LOCKDOWN] 비상 상태 감지. 로봇을 즉시 정지하고 관리자 해제를 기다립니다.")
         if self.bridge.enabled:
             self.bridge.emit(
                 "lockdown",
@@ -998,7 +1043,42 @@ class MissionController:
                 reason=reason,
                 meta=payload
             )
-        self._execute_lockdown_recovery(stage, reason, payload)
+        self._emit_log(stage, "락다운 상태에 진입했습니다. 관리자 해제를 대기합니다.", level='error', meta=payload)
+
+    def _await_lockdown_release(self, stage: str) -> None:
+        if not self.lockdown_active:
+            return
+        wait_meta = dict(self._lockdown_meta or {})
+        self._emit_log(stage, "관리자 해제를 대기합니다.", level='warning', meta=wait_meta)
+        print("[LOCKDOWN] 관리자 지문 해제를 기다리는 중입니다...")
+        release_payload: Optional[dict] = None
+        if self.bridge.enabled:
+            start = time.time()
+            while True:
+                release_payload = self.bridge.wait_for_event("lockdown_cleared", timeout=1.0)
+                if release_payload:
+                    break
+                if not getattr(self.bridge, "_running", False):
+                    if time.time() - start > 3.0:
+                        break
+                if time.time() - start > 1800:
+                    break
+        if not release_payload:
+            print("[LOCKDOWN] 해제 신호를 수신하지 못했습니다. 수동 복구를 진행합니다.")
+            release_payload = {"reason": "timeout"}
+        else:
+            print("[LOCKDOWN] 관리자 해제 신호 수신 완료.")
+        reason = release_payload.get("reason") if isinstance(release_payload, dict) else None
+        meta = dict(wait_meta)
+        if isinstance(release_payload, dict):
+            extra_meta = release_payload.get("meta") or {}
+            if isinstance(extra_meta, dict):
+                meta.update(extra_meta)
+            if release_payload.get("actor"):
+                meta["actor"] = release_payload.get("actor")
+        self._execute_lockdown_recovery(stage, reason or "unlock", meta)
+        self.lockdown_active = False
+        self._lockdown_meta = {}
 
     def rail_retract(self):
         stage_key = self._stage_key("레일 인입")
@@ -2140,6 +2220,12 @@ class MissionController:
             self._emit_log(self._stage_key("aborted"), message, level='error', meta=stage_meta)
             self._emit_complete('error', message, meta=stage_meta)
             print(f"\n[중단] {message}")
+            if self.lockdown_active:
+                try:
+                    self._await_lockdown_release(self._stage_key("lockdown"))
+                except Exception as err:
+                    self._emit_log(self._stage_key("lockdown"), f"락다운 복구 중 오류: {err}", level='warning', meta=stage_meta)
+                    print(f"[LOCKDOWN] 복구 절차 중 예외 발생: {err}")
             raise
         except KeyboardInterrupt:
             message = "사용자가 프로그램을 중단했습니다."

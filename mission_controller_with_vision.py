@@ -69,8 +69,8 @@ class BridgeInterface:
     def __init__(self, enabled: bool = False, context: dict | None = None):
         self.enabled = bool(enabled)
         self.context = dict(context or {})
-        self._waiters: dict[str, queue.Queue] = {}
-        self._early: dict[str, list[dict]] = {}
+        self._waiters: Dict[str, queue.Queue] = {}
+        self._early: Dict[str, List[dict]] = {}
         self._lock = threading.Lock()
         self._listener: threading.Thread | None = None
         self._running = False

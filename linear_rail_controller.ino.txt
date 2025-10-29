@@ -16,12 +16,18 @@ void motorMoveRelative(float distanceMm, float speedMmPerSec);
 void motorMoveToPosition(float targetMm, float speedMmPerSec);
 void sendStatus();
 bool readSerialLineNonBlocking(String &out);
+bool isHomeSensorTriggered();
 
 // 모터 제어 핀
 #define PUL_PIN 2  // PUL+ 연결 핀
 #define DIR_PIN 3  // DIR+ 연결 핀
 #define ENA_PIN 4  // EN+ 연결 핀
 // 주의: PUL-, DIR-, EN- 는 모두 Arduino GND에 연결!
+
+// 홈 센서 (SN04-N 근접 센서) 핀 설정
+#define HOME_SENSOR_PIN A12
+const bool HOME_SENSOR_ACTIVE_STATE = LOW; // NPN NO → 풀업 사용 시 LOW가 감지 상태
+
 
 // ==================== 모터 파라미터 ====================
 const float MAX_STROKE = 800.0;          // 최대 이동 거리 (mm)
@@ -55,6 +61,7 @@ void setup() {
   pinMode(PUL_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
   pinMode(ENA_PIN, OUTPUT);
+  pinMode(HOME_SENSOR_PIN, INPUT_PULLUP);
 
   digitalWrite(PUL_PIN, LOW);
   digitalWrite(DIR_PIN, LOW);
@@ -65,6 +72,7 @@ void setup() {
   Serial.print("  펄스/회전: ");     Serial.println(PULSES_PER_REV);
   Serial.print("  mm/회전: ");       Serial.println(MM_PER_REV);
   Serial.print("  펄스/mm: ");       Serial.println(STEPS_PER_MM, 2);
+  Serial.print("  홈 센서 상태: "); Serial.println(isHomeSensorTriggered() ? "TRIGGERED" : "OPEN");
 
   printMenu(); // 프로그램 시작 시 메뉴 호출
 }
@@ -129,6 +137,9 @@ void sendStatus() {
   Serial.print("MAX_STROKE=");
   Serial.print(MAX_STROKE);
   Serial.println("mm");
+
+  Serial.print("HOME_SWITCH=");
+  Serial.println(isHomeSensorTriggered() ? "TRIGGERED" : "OPEN");
 }
 
 // ==================== 시리얼 비차단 라인 파서 ====================
@@ -299,6 +310,12 @@ void motorMoveRelative(float distanceMm, float speedMmPerSec) {
   bool forward = distanceMm > 0;
   digitalWrite(DIR_PIN, forward ? HIGH : LOW);
 
+  if (!forward && isHomeSensorTriggered()) {
+    Serial.println("⚠ 홈 센서가 이미 감지된 상태입니다. 현재 위치를 0mm로 재설정합니다.");
+    currentPosition = 0.0f;
+    return;
+  }
+
   Serial.print("→ ");
   Serial.print(forward ? "전진" : "후진");
   Serial.print(" ");
@@ -331,6 +348,7 @@ void motorMoveRelative(float distanceMm, float speedMmPerSec) {
 
   // 가속/등속/감속
   const long SERIAL_POLL_EVERY = 200;  // N펄스마다 시리얼 체크
+  bool abortedByHomeSwitch = false;
   for (long i = 0; i < totalPulses; i++) {
     unsigned long currentDelay;
 
@@ -368,6 +386,19 @@ void motorMoveRelative(float distanceMm, float speedMmPerSec) {
     if (totalPulses > 100 && i > 0 && totalPulses / 10 > 0 && i % (totalPulses / 10) == 0) {
       Serial.print(".");
     }
+
+    if (!forward && isHomeSensorTriggered()) {
+      abortedByHomeSwitch = true;
+      break;
+    }
+  }
+
+  if (abortedByHomeSwitch) {
+    Serial.println();
+    Serial.println("⚠ 홈 센서 감지로 이동을 조기 종료합니다.");
+    currentPosition = 0.0f;
+    Serial.println("  현재 위치: 0.00mm (홈 센서)");
+    return;
   }
 
   currentPosition = targetPosition;
@@ -384,4 +415,8 @@ void motorMoveToPosition(float targetMm, float speedMmPerSec) {
 
   float distance = targetMm - currentPosition;
   motorMoveRelative(distance, speedMmPerSec);
+}
+
+bool isHomeSensorTriggered() {
+  return digitalRead(HOME_SENSOR_PIN) == HOME_SENSOR_ACTIVE_STATE;
 }

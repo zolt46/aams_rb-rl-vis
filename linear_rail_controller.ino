@@ -15,6 +15,7 @@ void handleMotorCommand(String cmd);
 void motorMoveRelative(float distanceMm, float speedMmPerSec);
 void motorMoveToPosition(float targetMm, float speedMmPerSec);
 void sendStatus();
+bool readSerialLineNonBlocking(String &out);
 
 // 모터 제어 핀
 #define PUL_PIN 2  // PUL+ 연결 핀
@@ -34,10 +35,16 @@ const int ACCEL_STEPS = 200;             // 가속/감속 구간 펄스 수
 const int MIN_DELAY   = 100;             // 최소 딜레이 (us) - 최대 속도
 const int MAX_DELAY   = 800;             // 최대 딜레이 (us) - 시작/종료 속도
 
+// 시리얼 비차단 파싱 버퍼
+String pendingSerialLine = "";          // 개행 대기 중인 명령 버퍼
+
 // ==================== 초기화 ====================
 void setup() {
   Serial.begin(115200);  // 브릿지 서버와 통신하기 위해 115200으로 설정
   while (!Serial);
+
+  // 모션 중 readStringUntil 블로킹을 방지하기 위해 타임아웃 최소화
+  Serial.setTimeout(1);
   
   // ID 전송 (브릿지 서버가 인식용)
   Serial.println("ID:TB6600CTL");
@@ -65,9 +72,11 @@ void setup() {
 // ==================== 메인 루프 ====================
 void loop() {
   if (Serial.available()) {
-    String msg = Serial.readStringUntil('\n');
-    msg.trim();
-    
+    String msg;
+    if (!readSerialLineNonBlocking(msg)) {
+      return; // 아직 개행이 도착하지 않음
+    }
+
     if (msg.length() == 0) return;
 
     // ID 질의(브릿지 장치 식별용) 처리 - 브릿지가 포트 오픈 직후 보낼 수 있으니 가장 먼저 처리
@@ -120,6 +129,40 @@ void sendStatus() {
   Serial.print("MAX_STROKE=");
   Serial.print(MAX_STROKE);
   Serial.println("mm");
+}
+
+// ==================== 시리얼 비차단 라인 파서 ====================
+bool readSerialLineNonBlocking(String &out) {
+  const size_t MAX_BUFFER = 96; // 한 줄 최대 길이 제한
+
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+
+    if (c == '\r') {
+      // CR은 무시하고 다음 문자 대기
+      continue;
+    }
+
+    if (c == '\n') {
+      String line = pendingSerialLine;
+      pendingSerialLine = "";
+      line.trim();
+      if (line.length() == 0) {
+        // 빈 줄이면 다음 입력을 계속 확인
+        continue;
+      }
+      out = line;
+      return true;
+    }
+
+    if (pendingSerialLine.length() >= MAX_BUFFER) {
+      // 버퍼가 가득 차면 앞쪽을 버리고 최근 문자 유지
+      pendingSerialLine.remove(0, pendingSerialLine.length() - (MAX_BUFFER - 1));
+    }
+    pendingSerialLine += c;
+  }
+
+  return false;
 }
 
 // ==================== 메뉴 출력 ====================
@@ -310,9 +353,8 @@ void motorMoveRelative(float distanceMm, float speedMmPerSec) {
 
     // --- 모션 중 경량 시리얼 핑 처리(브릿지 PING 대응) ---
     if (i % SERIAL_POLL_EVERY == 0) {
-      if (Serial.available()) {
-        String _tmp = Serial.readStringUntil('\n');
-        _tmp.trim();
+      String _tmp;
+      if (readSerialLineNonBlocking(_tmp)) {
         if (_tmp == "PING" || _tmp == "ping") {
           Serial.println("PONG");
         } else if (_tmp == "ID?" || _tmp == "ID") {

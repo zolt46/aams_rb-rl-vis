@@ -66,13 +66,13 @@ class BridgeAbort(Exception):
 
 
 class BridgeInterface:
-    def __init__(self, enabled: bool = False, context: dict | None = None):
+    def __init__(self, enabled: bool = False, context: Optional[dict] = None):
         self.enabled = bool(enabled)
         self.context = dict(context or {})
         self._waiters: Dict[str, queue.Queue] = {}
         self._early: Dict[str, List[dict]] = {}
         self._lock = threading.Lock()
-        self._listener: threading.Thread | None = None
+        self._listener: Optional[threading.Thread] = None
         self._running = False
 
     def start(self) -> None:
@@ -104,7 +104,7 @@ class BridgeInterface:
         except Exception:
             pass
 
-    def wait_for(self, stage: str, message: str, *, allow_cancel: bool = False, meta: dict | None = None) -> dict:
+    def wait_for(self, stage: str, message: str, *, allow_cancel: bool = False, meta: Optional[dict] = None) -> dict:
         if not self.enabled:
             return {}
         token = uuid.uuid4().hex

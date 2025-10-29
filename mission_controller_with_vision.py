@@ -212,24 +212,26 @@ class BridgeInterface:
                 data = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            token = data.get("token")
-            if not token:
-                continue
-            with self._lock:
-                if token in self._waiters:
-                    self._waiters[token].put(data)
-                else:
-                    self._early.setdefault(token, []).append(data)
             event_name = data.get("event")
             if event_name:
                 with self._lock:
-                    event_waiters = list(self._event_waiters.get(event_name, []))
-                if event_waiters:
-                    for waiter in event_waiters:
-                        waiter.put(data)
+                    waiters = list(self._event_waiters.get(event_name) or [])
+                if waiters:
+                    for queue_obj in waiters:
+                        try:
+                            queue_obj.put_nowait(data)
+                        except Exception:
+                            pass
                 else:
                     with self._lock:
                         self._early_events.setdefault(event_name, []).append(data)
+            token = data.get("token")
+            if token:
+                with self._lock:
+                    if token in self._waiters:
+                        self._waiters[token].put(data)
+                    else:
+                        self._early.setdefault(token, []).append(data)
 
 
 def resolve_mission_number(raw_value: Optional[Union[int, str]], fallback_label: Optional[str] = None) -> int:

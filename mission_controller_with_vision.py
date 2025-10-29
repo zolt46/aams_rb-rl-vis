@@ -20,6 +20,7 @@ import uuid
 import cv2
 import numpy as np
 import pyrealsense2 as rs
+from pathlib import Path
 from ultralytics import YOLO
 import math
 from collections import deque
@@ -30,7 +31,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from robot_sdk_v13_rail_extended import BridgeClient
 
-TEACH_FILE = "final_asset.json"
+BASE_DIR = Path(__file__).resolve().parent
+TEACH_FILE = BASE_DIR / "final_asset.json"
 KEEPALIVE_INTERVAL = 5.0
 
 # 레일 설정
@@ -40,7 +42,9 @@ RAIL_BACKWARD_SPEED = 200.0
 RAIL_HOME_SPEED = 200.0
 
 # 비전 설정
-SELECTOR_MODEL_PATH = r"selector.pt"
+SELECTOR_MODEL_PATH = BASE_DIR / "selector.pt"
+MAG_MODEL_PATH = BASE_DIR / "mag.pt"
+
 MAG_MODEL_PATH = r"mag.pt"
 VISION_CONF_THRES = 0.35
 VISION_IMG_SIZE = 640
@@ -620,10 +624,10 @@ class VisionController:
             print("[VISION] RealSense 카메라 초기화 완료")
             
             # YOLO 모델 로드
-            self.selector_model = YOLO(SELECTOR_MODEL_PATH)
+            self.selector_model = YOLO(str(SELECTOR_MODEL_PATH))
             print(f"[VISION] 조정간 모델 로드 완료: {SELECTOR_MODEL_PATH}")
             
-            self.mag_model = YOLO(MAG_MODEL_PATH)
+            self.mag_model = YOLO(str(MAG_MODEL_PATH))
             print(f"[VISION] 탄창 모델 로드 완료: {MAG_MODEL_PATH}")
             
         except Exception as e:
@@ -953,10 +957,10 @@ class MissionController:
         try:
             if self.with_mag:
                 try:
-                    self.rail_ensure_extended()
+                    self.bc.gripper_close()
                 except Exception as err:
-                    self._emit_log(stage, f"레일 배출 실패: {err}", level='error', meta=info_meta)
-                    print(f"[LOCKDOWN] 레일 배출 중 오류: {err}")
+                    self._emit_log(stage, f"그리퍼 상태 확인 실패: {err}", level='warning', meta=info_meta)
+                    print(f"[LOCKDOWN] 그리퍼 확인 중 오류: {err}")
                 try:
                     self._recover_mag_failure_outbound()
                     self._emit_log(stage, "탄창을 원위치에 복귀했습니다.", level='info', meta=info_meta)
@@ -2192,22 +2196,69 @@ if __name__ == "__main__":
             "mission_label": args.mission_label,
             "site": args.site
         })
-        controller = MissionController(
-            mission_number=mission_num,
-            direction=direction,
-            with_mag=with_mag,
-            expected_qr=expected_qr,
-            bridge_host=args.bridge_host,
-            enable_vision=True,
-            enable_qr_check=False,
-            enable_selector_check=True,
-            enable_mag_check=True,
-            bridge=bridge,
-            auto_mode=True,
-            mission_label=args.mission_label,
-            request_id=args.request_id,
-            site=args.site
-        )
+
+        if not TEACH_FILE.exists():
+            missing_msg = f"포지션 파일을 찾을 수 없습니다: {TEACH_FILE}"
+            if bridge.enabled:
+                bridge.emit(
+                    "log",
+                    stage="startup",
+                    level="error",
+                    message=missing_msg,
+                    error="teach_file_missing"
+                )
+                bridge.emit(
+                    "complete",
+                    status="error",
+                    stage="startup",
+                    message=missing_msg,
+                    error="teach_file_missing"
+                )
+            else:
+                print(f"[ERROR] {missing_msg}")
+            sys.exit(1)
+
+        try:
+            controller = MissionController(
+                mission_number=mission_num,
+                direction=direction,
+                with_mag=with_mag,
+                expected_qr=expected_qr,
+                bridge_host=args.bridge_host,
+                enable_vision=True,
+                enable_qr_check=False,
+                enable_selector_check=True,
+                enable_mag_check=True,
+                bridge=bridge,
+                auto_mode=True,
+                mission_label=args.mission_label,
+                request_id=args.request_id,
+                site=args.site
+            )
+        except Exception as exc:
+            error_message = f"컨트롤러 초기화 실패: {exc}"
+            import traceback
+            trace_str = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            if bridge.enabled:
+                bridge.emit(
+                    "log",
+                    stage="startup",
+                    level="error",
+                    message=error_message,
+                    error=type(exc).__name__
+                )
+                bridge.emit(
+                    "complete",
+                    status="error",
+                    stage="startup",
+                    message=error_message,
+                    error=type(exc).__name__,
+                    meta={"trace": trace_str}
+                )
+            else:
+                print(f"[ERROR] {error_message}")
+                print(trace_str)
+            sys.exit(1)
         try:
             controller.run()
         except BridgeAbort:

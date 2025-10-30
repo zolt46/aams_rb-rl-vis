@@ -657,17 +657,64 @@ class VisionController:
     def __init__(self):
         print("[VISION] 비전 시스템 초기화...")
         self.pipeline = None
+        self.pipeline_profile = None
+        self.pipeline_config = None
         self.selector_model = None
         self.mag_model = None
+
+    def _ensure_pipeline_config(self):
+        if self.pipeline_config is not None:
+            return
+        config = rs.config()
+        config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+        self.pipeline_config = config
+
+    def _start_pipeline(self, *, retries: int = 3, delay: float = 0.25):
+        self._ensure_pipeline_config()
+        last_error = None
+        for attempt in range(1, max(1, retries) + 1):
+            try:
+                if self.pipeline:
+                    try:
+                        self.pipeline.stop()
+                    except Exception:
+                        pass
+                self.pipeline = rs.pipeline()
+                self.pipeline_profile = self.pipeline.start(self.pipeline_config)
+                print(f"[VISION] RealSense 파이프라인 시작 (시도 {attempt})")
+                return
+            except Exception as err:
+                last_error = err
+                self.pipeline = None
+                self.pipeline_profile = None
+                print(f"[VISION ERROR] 파이프라인 시작 실패(시도 {attempt}): {err}")
+                if attempt < retries:
+                    try:
+                        time.sleep(delay * attempt)
+                    except Exception:
+                        pass
+        if last_error:
+            raise last_error
+
+    def restart_pipeline(self):
+        """RealSense 파이프라인을 재시작하고 초기 프레임을 준비한다."""
+        print("[VISION] RealSense 파이프라인을 재시작합니다...")
+        self._start_pipeline()
+        # 워밍업을 위해 몇 프레임을 미리 소비한다.
+        try:
+            for _ in range(3):
+                frames = self.pipeline.wait_for_frames()
+                if frames and frames.get_color_frame():
+                    break
+        except Exception as err:
+            print(f"[VISION WARN] 파이프라인 워밍업 중 예외: {err}")
+
         
     def initialize(self):
         """RealSense 및 YOLO 모델 초기화"""
         try:
             # RealSense 초기화
-            self.pipeline = rs.pipeline()
-            config = rs.config()
-            config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
-            self.pipeline.start(config)
+            self._start_pipeline()
             print("[VISION] RealSense 카메라 초기화 완료")
             
             # YOLO 모델 로드
@@ -685,13 +732,35 @@ class VisionController:
         """현재 프레임 획득"""
         if not self.pipeline:
             return None
-        
-        frames = self.pipeline.wait_for_frames()
-        color_frame = frames.get_color_frame()
-        if not color_frame:
-            return None
-        
-        return np.asanyarray(color_frame.get_data())
+
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                frames = self.pipeline.wait_for_frames()
+                color_frame = frames.get_color_frame()
+                if not color_frame:
+                    last_error = RuntimeError("color frame unavailable")
+                    raise last_error
+                return np.asanyarray(color_frame.get_data())
+            except RuntimeError as err:
+                message = str(err)
+                last_error = err
+                if "Frame didn't arrive" in message or "Frame did not arrive" in message:
+                    print(f"[VISION WARN] 프레임 수신 지연 발생(시도 {attempt}): {err}")
+                    try:
+                        self.restart_pipeline()
+                    except Exception as restart_err:
+                        last_error = restart_err
+                        print(f"[VISION ERROR] 파이프라인 재시작 실패: {restart_err}")
+                        break
+                    continue
+                raise
+            except Exception as err:
+                last_error = err
+                break
+        if last_error:
+            raise last_error
+        return None
     
     def check_selector_safe(self, display=True) -> Tuple[bool, str]:
         """조정간 안전 상태 확인"""
@@ -731,6 +800,9 @@ class VisionController:
                 print("[VISION] RealSense 카메라 종료")
             except Exception:
                 pass
+        self.pipeline = None
+        self.pipeline_profile = None
+        self.pipeline_config = None
         cv2.destroyAllWindows()
 
 # ----------------------------- 스텝 자료구조 -----------------------------
